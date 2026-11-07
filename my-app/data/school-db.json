@@ -1,0 +1,433 @@
+{
+  "school": {
+    "id": "sch_happy_home",
+    "name": "HAPPY HOME EDUCATIONAL CENTRE",
+    "motto": "Excellence, Integrity and Wisdom",
+    "address": "NO. 3 VICTORY CLOSE, ELIJIJI ROAD, RUMUROLU, PORT HARCOURT.",
+    "phone": "08079964720",
+    "email": "happyhome.education@yahoo.com",
+    "logoUrl": "/logo.jpeg",
+    "stampUrl": "",
+    "principalName": "Dr. Mrs Ibemgbo Maryann",
+    "headTeacherName": "Dr. Mrs Ibemgbo Maryann",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "users": [
+    {
+      "id": "usr_super_admin",
+      "schoolId": "sch_happy_home",
+      "fullName": "Chief Administrator",
+      "email": "superadmin@happyhome.edu",
+      "password": "password123",
+      "role": "super_admin",
+      "phone": "08079964720",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr_school_admin",
+      "schoolId": "sch_happy_home",
+      "fullName": "Dr. Mrs Ibemgbo Maryann (Administrator)",
+      "email": "happyhome.education@yahoo.com",
+      "password": "password123",
+      "role": "school_admin",
+      "phone": "08079964720",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr_head_teacher",
+      "schoolId": "sch_happy_home",
+      "fullName": "Dr. Mrs Ibemgbo Maryann (Head Teacher)",
+      "email": "headteacher@happyhome.edu",
+      "password": "password123",
+      "role": "head_teacher",
+      "phone": "08079964720",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr_teacher_helen",
+      "schoolId": "sch_happy_home",
+      "fullName": "Miss Helen Daniel",
+      "email": "helen.daniel@happyhome.edu",
+      "password": "password123",
+      "role": "class_teacher",
+      "assignedClassId": "cls_pri_1",
+      "phone": "08034445555",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr_teacher_benson",
+      "schoolId": "sch_happy_home",
+      "fullName": "Mrs Benson",
+      "email": "mrs.benson@happyhome.edu",
+      "password": "password123",
+      "role": "class_teacher",
+      "assignedClassId": "cls_pri_2",
+      "phone": "08035556666",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr_teacher_kara",
+      "schoolId": "sch_happy_home",
+      "fullName": "Mrs Kara",
+      "email": "mrs.kara@happyhome.edu",
+      "password": "password123",
+      "role": "class_teacher",
+      "assignedClassId": "cls_pri_4",
+      "phone": "08037778888",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "usr_subject_teacher",
+      "schoolId": "sch_happy_home",
+      "fullName": "Mr. Emmanuel Okafor",
+      "email": "subject.teacher@happyhome.edu",
+      "password": "password123",
+      "role": "subject_teacher",
+      "phone": "08036667777",
+      "status": "active",
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "classes": [
+    {
+      "id": "cls_pri_1",
+      "schoolId": "sch_happy_home",
+      "name": "Primary 1",
+      "category": "primary",
+      "order": 1,
+      "classTeacherId": "usr_teacher_helen",
+      "capacity": 35,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cls_pri_2",
+      "schoolId": "sch_happy_home",
+      "name": "Primary 2",
+      "category": "primary",
+      "order": 2,
+      "classTeacherId": "usr_teacher_benson",
+      "capacity": 35,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cls_pri_3",
+      "schoolId": "sch_happy_home",
+      "name": "Primary 3",
+      "category": "primary",
+      "order": 3,
+      "classTeacherId": "usr_teacher_benson",
+      "capacity": 35,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cls_pri_4",
+      "schoolId": "sch_happy_home",
+      "name": "Primary 4",
+      "category": "primary",
+      "order": 4,
+      "classTeacherId": "usr_teacher_kara",
+      "capacity": 35,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "cls_pri_5",
+      "schoolId": "sch_happy_home",
+      "name": "Primary 5",
+      "category": "primary",
+      "order": 5,
+      "classTeacherId": "usr_teacher_kara",
+      "capacity": 35,
+      "createdAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "subjects": [
+    {
+      "id": "sub_math",
+      "schoolId": "sch_happy_home",
+      "name": "Mathematics",
+      "code": "MTH",
+      "category": "core",
+      "isDefault": true,
+      "order": 1
+    },
+    {
+      "id": "sub_eng",
+      "schoolId": "sch_happy_home",
+      "name": "English Language",
+      "code": "ENG",
+      "category": "core",
+      "isDefault": true,
+      "order": 2
+    },
+    {
+      "id": "sub_bsci",
+      "schoolId": "sch_happy_home",
+      "name": "Basic Science",
+      "code": "BSC",
+      "category": "core",
+      "isDefault": true,
+      "order": 3
+    },
+    {
+      "id": "sub_btech",
+      "schoolId": "sch_happy_home",
+      "name": "Basic Technology",
+      "code": "BTE",
+      "category": "core",
+      "isDefault": true,
+      "order": 4
+    },
+    {
+      "id": "sub_soc",
+      "schoolId": "sch_happy_home",
+      "name": "Social Studies",
+      "code": "SOS",
+      "category": "core",
+      "isDefault": true,
+      "order": 5
+    },
+    {
+      "id": "sub_civ",
+      "schoolId": "sch_happy_home",
+      "name": "Civic Education",
+      "code": "CVE",
+      "category": "core",
+      "isDefault": true,
+      "order": 6
+    },
+    {
+      "id": "sub_comp",
+      "schoolId": "sch_happy_home",
+      "name": "Computer Studies",
+      "code": "CSC",
+      "category": "core",
+      "isDefault": true,
+      "order": 7
+    },
+    {
+      "id": "sub_crs",
+      "schoolId": "sch_happy_home",
+      "name": "Christian Religious Studies",
+      "code": "CRS",
+      "category": "core",
+      "isDefault": true,
+      "order": 8
+    },
+    {
+      "id": "sub_irs",
+      "schoolId": "sch_happy_home",
+      "name": "Islamic Religious Studies",
+      "code": "IRS",
+      "category": "core",
+      "isDefault": true,
+      "order": 9
+    },
+    {
+      "id": "sub_phe",
+      "schoolId": "sch_happy_home",
+      "name": "Physical and Health Education",
+      "code": "PHE",
+      "category": "core",
+      "isDefault": true,
+      "order": 10
+    },
+    {
+      "id": "sub_art",
+      "schoolId": "sch_happy_home",
+      "name": "Creative Arts",
+      "code": "CRA",
+      "category": "vocational",
+      "isDefault": true,
+      "order": 11
+    },
+    {
+      "id": "sub_agr",
+      "schoolId": "sch_happy_home",
+      "name": "Agricultural Science",
+      "code": "AGR",
+      "category": "vocational",
+      "isDefault": true,
+      "order": 12
+    },
+    {
+      "id": "sub_hec",
+      "schoolId": "sch_happy_home",
+      "name": "Home Economics",
+      "code": "HEC",
+      "category": "vocational",
+      "isDefault": true,
+      "order": 13
+    },
+    {
+      "id": "sub_hw",
+      "schoolId": "sch_happy_home",
+      "name": "Handwriting",
+      "code": "HDW",
+      "category": "core",
+      "isDefault": true,
+      "order": 14
+    },
+    {
+      "id": "sub_vr",
+      "schoolId": "sch_happy_home",
+      "name": "Verbal Reasoning",
+      "code": "VBR",
+      "category": "core",
+      "isDefault": true,
+      "order": 15
+    },
+    {
+      "id": "sub_qr",
+      "schoolId": "sch_happy_home",
+      "name": "Quantitative Reasoning",
+      "code": "QTR",
+      "category": "core",
+      "isDefault": true,
+      "order": 16
+    }
+  ],
+  "sessions": [
+    {
+      "id": "ses_2025_2026",
+      "schoolId": "sch_happy_home",
+      "name": "2025/2026",
+      "isCurrent": false,
+      "startDate": "2025-09-10",
+      "endDate": "2026-07-20"
+    },
+    {
+      "id": "ses_2026_2027",
+      "schoolId": "sch_happy_home",
+      "name": "2026/2027",
+      "isCurrent": true,
+      "startDate": "2026-09-08",
+      "endDate": "2027-07-18"
+    }
+  ],
+  "terms": [
+    {
+      "id": "term_1st_2026",
+      "sessionId": "ses_2026_2027",
+      "name": "First Term",
+      "isCurrent": true,
+      "nextTermBegins": "2027-01-11",
+      "isLocked": false,
+      "totalSchoolDays": 65
+    },
+    {
+      "id": "term_2nd_2026",
+      "sessionId": "ses_2026_2027",
+      "name": "Second Term",
+      "isCurrent": false,
+      "nextTermBegins": "2027-04-26",
+      "isLocked": false,
+      "totalSchoolDays": 60
+    },
+    {
+      "id": "term_3rd_2026",
+      "sessionId": "ses_2026_2027",
+      "name": "Third Term",
+      "isCurrent": false,
+      "nextTermBegins": "2027-09-13",
+      "isLocked": false,
+      "totalSchoolDays": 60
+    }
+  ],
+  "students": [],
+  "scores": [],
+  "conductAssessments": [],
+  "attendanceRecords": [],
+  "reportComments": [],
+  "gradingScale": [
+    {
+      "id": "grd_a",
+      "grade": "A",
+      "minScore": 80,
+      "maxScore": 100,
+      "remark": "Excellent",
+      "description": "Outstanding achievement"
+    },
+    {
+      "id": "grd_b",
+      "grade": "B",
+      "minScore": 70,
+      "maxScore": 79,
+      "remark": "Very Good",
+      "description": "High level of achievement"
+    },
+    {
+      "id": "grd_c",
+      "grade": "C",
+      "minScore": 60,
+      "maxScore": 69,
+      "remark": "Good",
+      "description": "Sound level of achievement"
+    },
+    {
+      "id": "grd_d",
+      "grade": "D",
+      "minScore": 50,
+      "maxScore": 59,
+      "remark": "Fair",
+      "description": "Basic level of achievement"
+    },
+    {
+      "id": "grd_e",
+      "grade": "E",
+      "minScore": 40,
+      "maxScore": 49,
+      "remark": "Poor",
+      "description": "Marginal achievement"
+    },
+    {
+      "id": "grd_f",
+      "grade": "F",
+      "minScore": 0,
+      "maxScore": 39,
+      "remark": "Very Poor",
+      "description": "Inadequate achievement"
+    }
+  ],
+  "resultApprovals": [],
+  "auditLogs": [
+    {
+      "id": "log_1794001635276_v5193",
+      "schoolId": "sch_happy_home",
+      "userId": "admin",
+      "userName": "Administrator",
+      "action": "DELETE_STUDENT",
+      "entityType": "student",
+      "entityId": "std_1794001576019_757r",
+      "details": "Removed student record: Ibemgbo Rejoice (HHEC/2026/001)",
+      "createdAt": "2026-11-06T21:47:15.276Z"
+    },
+    {
+      "id": "log_1794001576027_sdv8g",
+      "schoolId": "sch_happy_home",
+      "userId": "admin",
+      "userName": "Administrator",
+      "action": "CREATE_STUDENT",
+      "entityType": "student",
+      "entityId": "std_1794001576019_757r",
+      "details": "Registered student Ibemgbo Rejoice (HHEC/2026/001)",
+      "createdAt": "2026-11-06T21:46:16.027Z"
+    },
+    {
+      "id": "log_init",
+      "schoolId": "sch_happy_home",
+      "userId": "system",
+      "userName": "System Initialization",
+      "action": "SYSTEM_INIT",
+      "entityType": "database",
+      "details": "System configured for Happy Home Educational Centre with 0 students.",
+      "createdAt": "2026-11-06T20:21:47.333Z"
+    }
+  ]
+}

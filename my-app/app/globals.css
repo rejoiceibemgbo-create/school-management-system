@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+}
+
+html, body {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Print specific styles for A4 Report Cards & Broadsheets */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt;
+  }
+
+  /* Hide UI elements during print */
+  .no-print,
+  nav,
+  aside,
+  header,
+  footer,
+  button,
+  .print-hide {
+    display: none !important;
+  }
+
+  /* Force print color and backgrounds */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Page break rules for multi-student class report cards */
+  .page-break {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .report-card-container {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .broadsheet-print-container {
+    width: 100% !important;
+    overflow: visible !important;
+  }
+}
