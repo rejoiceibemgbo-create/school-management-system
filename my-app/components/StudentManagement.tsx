@@ -67,6 +67,50 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
   const [importError, setImportError] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Student photo state
+  const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string>('');
+  const uploadStudentPhoto = async (studentId: string, file: File) => {
+  const uploadData = new FormData();
+
+  uploadData.append('studentId', studentId);
+  uploadData.append('file', file);
+
+  const response = await fetch('/api/students/upload-photo', {
+    method: 'POST',
+    body: uploadData,
+  });
+
+  const result = await response.json();
+
+  if (!response.ok || result.error) {
+    throw new Error(result.error || 'Photo upload failed.');
+  }
+
+  return result.photoPath as string;
+};
+
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      alert('Please select a JPG, PNG or WEBP image.');
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Photo must be smaller than 5 MB.');
+      e.target.value = '';
+      return;
+    }
+
+    setSelectedPhoto(file);
+    setPhotoPreview(URL.createObjectURL(file));
+  };
+
   // Fetch classes and students
   const loadData = async () => {
     try {
@@ -104,6 +148,9 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
     const year = new Date().getFullYear();
     const autoAdm = `HHEC/${year}/${String(count).padStart(3, '0')}`;
 
+    setSelectedPhoto(null);
+    setPhotoPreview('');
+
     setFormData({
       firstName: '',
       lastName: '',
@@ -123,34 +170,82 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
     setShowAddModal(true);
   };
 
-  const handleCreateStudent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.classId) {
-      alert('First name, last name, and class are required.');
+const handleCreateStudent = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  if (
+    !formData.firstName.trim() ||
+    !formData.lastName.trim() ||
+    !formData.classId
+  ) {
+    alert('First name, last name, and class are required.');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      alert(data.error || 'Failed to register student.');
       return;
     }
 
-    try {
-      const res = await fetch('/api/students', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-      const data = await res.json();
-      if (data.error) {
-        alert(data.error);
-        return;
-      }
+    // Get the newly created student's ID.
+    const studentId =
+      data.student?.id ||
+      data.id ||
+      data.studentId;
+
+    if (!studentId) {
+      alert(
+        'Student was registered, but the API did not return the student ID. The photo could not be uploaded.'
+      );
       setShowAddModal(false);
-      loadData();
+      await loadData();
+
       if (onStudentCountChange) onStudentCountChange();
-    } catch (err) {
-      alert('Failed to register student');
+      return;
     }
-  };
+
+    // Upload the selected photograph, if one was chosen.
+    if (selectedPhoto) {
+      try {
+        await uploadStudentPhoto(studentId, selectedPhoto);
+        alert('Student registered and photograph uploaded successfully.');
+      } catch (photoError) {
+        console.error('Photo upload failed:', photoError);
+        alert(
+          'Student was registered successfully, but the photograph could not be uploaded. You can edit the student and try again.'
+        );
+      }
+    } else {
+      alert('Student registered successfully.');
+    }
+
+    setShowAddModal(false);
+    setSelectedPhoto(null);
+    setPhotoPreview('');
+
+    await loadData();
+
+    if (onStudentCountChange) onStudentCountChange();
+  } catch (err) {
+    console.error('Student registration error:', err);
+    alert('Failed to register student.');
+  }
+};
 
   const handleOpenEdit = (student: Student) => {
     setActiveStudent(student);
+    setSelectedPhoto(null);
+    setPhotoPreview('');
+
     setFormData({
       firstName: student.firstName,
       lastName: student.lastName,
@@ -170,31 +265,53 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
     setShowEditModal(true);
   };
 
-  const handleUpdateStudent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeStudent) return;
+ const handleUpdateStudent = async (e: React.FormEvent) => {
+  e.preventDefault();
 
-    try {
-      const res = await fetch('/api/students', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: activeStudent.id,
-          ...formData,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) {
-        alert(data.error);
-        return;
-      }
-      setShowEditModal(false);
-      loadData();
-    } catch (err) {
-      alert('Failed to update student');
+  if (!activeStudent) return;
+
+  try {
+    const res = await fetch('/api/students', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: activeStudent.id,
+        ...formData,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      alert(data.error || 'Failed to update student.');
+      return;
     }
-  };
 
+    // Upload a new photograph only if one was selected.
+    if (selectedPhoto) {
+      try {
+        await uploadStudentPhoto(activeStudent.id, selectedPhoto);
+        alert('Student record and photograph updated successfully.');
+      } catch (photoError) {
+        console.error('Photo upload failed:', photoError);
+        alert(
+          'Student details were updated, but the photograph could not be uploaded. Please try again.'
+        );
+      }
+    } else {
+      alert('Student record updated successfully.');
+    }
+
+    setShowEditModal(false);
+    setSelectedPhoto(null);
+    setPhotoPreview('');
+
+    await loadData();
+  } catch (err) {
+    console.error('Student update error:', err);
+    alert('Failed to update student.');
+  }
+};
   const handleDeleteStudent = async (student: Student) => {
     if (!confirm(`Are you sure you want to delete or remove ${student.firstName} ${student.lastName}? This cannot be undone.`)) {
       return;
@@ -485,7 +602,6 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
           </div>
         </div>
       </div>
-
       {/* Students Data Table */}
       <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
         {loading ? (
@@ -583,7 +699,7 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
                       </td>
                       <td className="py-3 px-3.5">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${student.status === 'active' ? 'bg-emerald-100 text-emerald-800' :
-                            student.status === 'graduated' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700'
+                          student.status === 'graduated' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700'
                           }`}>
                           {student.status}
                         </span>
@@ -644,6 +760,36 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
             </div>
 
             <form onSubmit={handleCreateStudent} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  Student Photograph
+                </label>
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                  <div className="w-24 h-24 rounded-full bg-slate-200 border border-slate-300 overflow-hidden flex items-center justify-center shrink-0">
+                    {photoPreview ? (
+                      <img src={photoPreview} alt="Student preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <Camera className="w-8 h-8 text-slate-400" />
+                    )}
+                  </div>
+                  <div className="flex-1 w-full">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handlePhotoChange}
+                      className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"
+                    />
+                    <p className="text-[10px] text-slate-500 mt-2">
+                      Accepted formats: JPG, PNG or WEBP. Maximum size: 5 MB.
+                    </p>
+                    {selectedPhoto && (
+                      <p className="text-[10px] text-emerald-600 mt-1">
+                        Selected: {selectedPhoto.name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -828,6 +974,38 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
             </div>
 
             <form onSubmit={handleUpdateStudent} className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4">
+                <label className="block text-xs font-semibold text-slate-700 mb-2">
+                  Student Photograph
+                </label>
+                <div className="flex flex-col sm:flex-row items-center gap-4">
+                  <div className="w-24 h-24 rounded-full bg-slate-200 border border-slate-300 overflow-hidden flex items-center justify-center shrink-0">
+                    {photoPreview ? (
+                      <img src={photoPreview} alt="Selected student preview" className="w-full h-full object-cover" />
+                    ) : activeStudent?.photoUrl ? (
+                      <img src={activeStudent.photoUrl} alt="Current student photo" className="w-full h-full object-cover" />
+                    ) : (
+                      <Camera className="w-8 h-8 text-slate-400" />
+                    )}
+                  </div>
+                  <div className="flex-1 w-full">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={handlePhotoChange}
+                      className="w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 cursor-pointer"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-2">
+                      Choose a JPG, PNG or WEBP image. Maximum size: 5 MB.
+                    </p>
+                    {selectedPhoto && (
+                      <p className="text-[11px] text-emerald-700 mt-1">
+                        Selected: {selectedPhoto.name}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Admission Number</label>
@@ -982,7 +1160,6 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
           </div>
         </div>
       )}
-
       {/* --- MODAL 3: VIEW PROFILE MODAL --- */}
       {showProfileModal && activeStudent && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
@@ -1001,14 +1178,14 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
                   activeStudent.firstName.charAt(0)
                 )}
               </div>
-              <h3 className="text-lg font-bold mt-2">
+              <h3 className="font-bold text-lg mt-3">
                 {activeStudent.lastName} {activeStudent.firstName} {activeStudent.middleName || ''}
               </h3>
-              <p className="text-xs text-indigo-200 font-mono">{activeStudent.admissionNumber}</p>
+              <p className="text-indigo-200 text-xs font-mono mt-1">{activeStudent.admissionNumber}</p>
             </div>
 
-            <div className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
-              <div className="grid grid-cols-2 gap-3 pb-3 border-b border-slate-100">
+            <div className="p-6 space-y-4 text-xs overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-100">
                 <div>
                   <span className="text-slate-400 block text-[10px] uppercase font-semibold">Class</span>
                   <span className="font-bold text-slate-800 text-sm">{(activeStudent as any).className || 'Primary 1'}</span>
@@ -1211,4 +1388,3 @@ export default function StudentManagement({ onStudentCountChange }: StudentManag
     </div>
   );
 }
-

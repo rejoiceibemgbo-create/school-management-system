@@ -1,67 +1,211 @@
-import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 
-export async function GET(request: Request) {
+import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
+import bcrypt from 'bcryptjs';
+import { createSessionToken,verifySessionToken } from '@/lib/auth-session';
+
+
+export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
+    const token = request.cookies.get('school_session')?.value;
 
-    const database = db.read();
-    if (userId) {
-      const user = database.users.find(u => u.id === userId);
-      if (!user) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 });
-      }
-      const { password, ...safeUser } = user;
-      return NextResponse.json({ user: safeUser });
+    if (!token) {
+      return NextResponse.json(
+        { user: null },
+        { status: 401 }
+      );
     }
 
-    // Default to the first admin if no userId passed, or list safe users
-    const safeUsers = database.users.map(({ password, ...u }) => u);
-    return NextResponse.json({ users: safeUsers });
+    const session = verifySessionToken(token);
+
+    if (!session) {
+      const response = NextResponse.json(
+        { user: null },
+        { status: 401 }
+      );
+
+      response.cookies.delete('school_session');
+      return response;
+    }
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', session.userId)
+      .eq('school_id', session.schoolId)
+      .single();
+
+    if (error || !user || user.status !== 'active') {
+      const response = NextResponse.json(
+        { user: null },
+        { status: 401 }
+      );
+
+      response.cookies.delete('school_session');
+      return response;
+    }
+
+    const {
+      password_hash,
+      school_id,
+      full_name,
+      assigned_class_id,
+      assigned_subject_ids,
+      created_at,
+      ...otherFields
+    } = user;
+
+    return NextResponse.json({
+      user: {
+        ...otherFields,
+        schoolId: school_id,
+        fullName: full_name,
+        assignedClassId: assigned_class_id,
+        assignedSubjectIds: assigned_subject_ids,
+        createdAt: created_at,
+      },
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch user' }, { status: 500 });
+    console.error('Session verification error:', error);
+
+    return NextResponse.json(
+      { error: 'Failed to verify session' },
+      { status: 500 }
+    );
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { email, password, action } = body;
+    const email = String(body.email || '').trim().toLowerCase();
+    const password = String(body.password || '');
 
-    const database = db.read();
-
-    if (action === 'change_password') {
-      const { userId, newPassword } = body;
-      const userIndex = database.users.findIndex(u => u.id === userId);
-      if (userIndex === -1) {
-        return NextResponse.json({ error: 'User not found' }, { status: 404 });
-      }
-      database.users[userIndex].password = newPassword;
-      db.write(database);
-      db.logAudit(userId, database.users[userIndex].fullName, 'CHANGE_PASSWORD', 'user', userId, 'Password updated successfully');
-      return NextResponse.json({ success: true, message: 'Password changed successfully' });
+    if (!email || !password) {
+      return NextResponse.json(
+        { success: false, error: 'Email and password are required.' },
+        { status: 400 }
+      );
     }
 
-    // Login action
-    const user = database.users.find(u => u.email.toLowerCase() === email?.toLowerCase());
-    if (!user) {
-      return NextResponse.json({ error: 'Invalid email address' }, { status: 401 });
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .ilike('email', email)
+      .eq('school_id', 'sch_happy_home')
+      .maybeSingle();
+
+    if (error) {
+      console.error('Login database error:', error);
+      return NextResponse.json(
+        { success: false, error: 'Unable to verify login.' },
+        { status: 500 }
+      );
     }
 
-    if (user.password && user.password !== password) {
-      return NextResponse.json({ error: 'Incorrect password' }, { status: 401 });
+    if (!user || !user.password_hash) {
+      return NextResponse.json(
+        { success: false, error: 'Incorrect email or password.' },
+        { status: 401 }
+      );
     }
 
-    const { password: _, ...safeUser } = user;
-    db.logAudit(user.id, user.fullName, 'LOGIN', 'auth', user.id, `User logged in as ${user.role}`);
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user.password_hash
+    );
 
-    return NextResponse.json({
+    if (!passwordMatches) {
+      return NextResponse.json(
+        { success: false, error: 'Incorrect email or password.' },
+        { status: 401 }
+      );
+    }
+
+    if (user.status !== 'active') {
+      return NextResponse.json(
+        { success: false, error: 'This account is inactive.' },
+        { status: 403 }
+      );
+    }
+
+    const { data: school, error: schoolError } = await supabase
+      .from('schools')
+      .select('*')
+      .eq('id', user.school_id)
+      .single();
+
+    if (schoolError || !school) {
+      console.error('School lookup error:', schoolError);
+      return NextResponse.json(
+        { success: false, error: 'School information could not be loaded.' },
+        { status: 500 }
+      );
+    }
+
+    const {
+      password_hash,
+      school_id,
+      full_name,
+      assigned_class_id,
+      assigned_subject_ids,
+      created_at,
+      ...otherFields
+    } = user;
+
+    const safeUser = {
+      ...otherFields,
+      schoolId: school_id,
+      fullName: full_name,
+      assignedClassId: assigned_class_id,
+      assignedSubjectIds: assigned_subject_ids,
+      createdAt: created_at,
+    };
+
+    const token = createSessionToken(user.id, user.school_id);
+
+    const response = NextResponse.json({
       success: true,
       user: safeUser,
-      school: database.school,
+      school: {
+        id: school.id,
+        name: school.name,
+        motto: school.motto,
+        address: school.address,
+        phone: school.phone,
+        email: school.email,
+        logoUrl: school.logo_url,
+        principalName: school.principal_name,
+        headTeacherName: school.head_teacher_name,
+      },
     });
+
+    response.cookies.set('school_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 8 * 60 * 60,
+    });
+
+    return response;
   } catch (error) {
-    return NextResponse.json({ error: 'Authentication failed' }, { status: 500 });
+    console.error('Login error:', error);
+
+    return NextResponse.json(
+      { success: false, error: 'Login failed. Please try again.' },
+      { status: 500 }
+    );
   }
+}
+
+export async function DELETE() {
+  const response = NextResponse.json({
+    success: true,
+    message: 'Logged out successfully',
+  });
+
+  response.cookies.delete('school_session');
+
+  return response;
 }

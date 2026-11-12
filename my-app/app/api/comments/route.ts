@@ -1,6 +1,8 @@
+
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { ReportComment } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+
+const SCHOOL_ID = 'sch_happy_home';
 
 export async function GET(request: Request) {
   try {
@@ -10,31 +12,56 @@ export async function GET(request: Request) {
     const classId = searchParams.get('classId');
 
     if (!sessionId || !termId || !classId) {
-      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Missing parameters' },
+        { status: 400 }
+      );
     }
 
-    const database = db.read();
-    const students = database.students.filter(s => s.classId === classId && s.status === 'active');
-    const comments = database.reportComments.filter(
-      c => c.classId === classId && c.sessionId === sessionId && c.termId === termId
-    );
+    const [studentsRes, commentsRes] = await Promise.all([
+      supabase
+        .from('students')
+        .select('id, admission_number, first_name, last_name, middle_name')
+        .eq('school_id', SCHOOL_ID)
+        .eq('class_id', classId)
+        .eq('status', 'active')
+        .order('last_name'),
 
-    const data = students.map(st => {
-      const existing = comments.find(c => c.studentId === st.id);
+      supabase
+        .from('report_comments')
+        .select('*')
+        .eq('school_id', SCHOOL_ID)
+        .eq('class_id', classId)
+        .eq('session_id', sessionId)
+        .eq('term_id', termId),
+    ]);
+
+    if (studentsRes.error) throw studentsRes.error;
+    if (commentsRes.error) throw commentsRes.error;
+
+    const data = (studentsRes.data || []).map((student) => {
+      const existing = (commentsRes.data || []).find(
+        (comment) => comment.student_id === student.id
+      );
+
       return {
-        studentId: st.id,
-        admissionNumber: st.admissionNumber,
-        studentName: `${st.lastName} ${st.firstName} ${st.middleName || ''}`.trim(),
-        classTeacherComment: existing?.classTeacherComment || '',
-        headTeacherComment: existing?.headTeacherComment || '',
-        promotionStatus: existing?.promotionStatus || 'Promoted',
+        studentId: student.id,
+        admissionNumber: student.admission_number,
+        studentName: `${student.last_name} ${student.first_name} ${student.middle_name || ''}`.trim(),
+        classTeacherComment: existing?.class_teacher_comment || '',
+        headTeacherComment: existing?.head_teacher_comment || '',
+        promotionStatus: existing?.promotion_status || 'Promoted',
         hasRecord: !!existing,
       };
     });
 
     return NextResponse.json({ comments: data });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch comments' }, { status: 500 });
+    console.error('Fetch comments error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch comments' },
+      { status: 500 }
+    );
   }
 }
 
@@ -44,41 +71,67 @@ export async function POST(request: Request) {
     const { sessionId, termId, classId, comments } = body;
 
     if (!sessionId || !termId || !classId || !Array.isArray(comments)) {
-      return NextResponse.json({ error: 'Missing required parameters' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Missing required parameters' },
+        { status: 400 }
+      );
     }
-
-    const database = db.read();
 
     for (const item of comments) {
       if (!item.studentId) continue;
 
-      const existingIndex = database.reportComments.findIndex(
-        c => c.studentId === item.studentId && c.sessionId === sessionId && c.termId === termId
-      );
+      const { data: existing, error: findError } = await supabase
+        .from('report_comments')
+        .select('id')
+        .eq('school_id', SCHOOL_ID)
+        .eq('student_id', item.studentId)
+        .eq('session_id', sessionId)
+        .eq('term_id', termId)
+        .maybeSingle();
 
-      const record: ReportComment = {
-        id: existingIndex !== -1 ? database.reportComments[existingIndex].id : `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        schoolId: database.school.id,
-        sessionId,
-        termId,
-        classId,
-        studentId: item.studentId,
-        classTeacherComment: item.classTeacherComment || '',
-        headTeacherComment: item.headTeacherComment || '',
-        promotionStatus: item.promotionStatus || 'Promoted',
-        updatedAt: new Date().toISOString(),
+      if (findError) throw findError;
+
+      const record = {
+        school_id: SCHOOL_ID,
+        session_id: sessionId,
+        term_id: termId,
+        class_id: classId,
+        student_id: item.studentId,
+        class_teacher_comment: item.classTeacherComment || '',
+        head_teacher_comment: item.headTeacherComment || '',
+        promotion_status: item.promotionStatus || 'Promoted',
+        updated_at: new Date().toISOString(),
       };
 
-      if (existingIndex !== -1) {
-        database.reportComments[existingIndex] = record;
+      if (existing) {
+        const { error } = await supabase
+          .from('report_comments')
+          .update(record)
+          .eq('id', existing.id)
+          .eq('school_id', SCHOOL_ID);
+
+        if (error) throw error;
       } else {
-        database.reportComments.push(record);
+        const { error } = await supabase
+          .from('report_comments')
+          .insert({
+            id: `cmt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            ...record,
+          });
+
+        if (error) throw error;
       }
     }
 
-    db.write(database);
-    return NextResponse.json({ success: true, message: 'Comments saved successfully' });
+    return NextResponse.json({
+      success: true,
+      message: 'Comments saved successfully',
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to save comments' }, { status: 500 });
+    console.error('Save comments error:', error);
+    return NextResponse.json(
+      { error: 'Failed to save comments' },
+      { status: 500 }
+    );
   }
 }

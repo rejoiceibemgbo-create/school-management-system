@@ -1,50 +1,147 @@
+
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
+
+const SCHOOL_ID = 'sch_happy_home';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
-    const classId = searchParams.get('classId');
     const sessionId = searchParams.get('sessionId');
     const termId = searchParams.get('termId');
+    const classId = searchParams.get('classId');
 
-    if (!classId || !sessionId || !termId) {
-      return NextResponse.json({ error: 'Class, Session, and Term are required' }, { status: 400 });
+    if (!sessionId || !termId || !classId) {
+      return NextResponse.json(
+        { error: 'Missing session, term, or class' },
+        { status: 400 }
+      );
     }
 
-    const database = db.read();
-    const classObj = database.classes.find(c => c.id === classId);
-    const sessionObj = database.sessions.find(s => s.id === sessionId);
-    const termObj = database.terms.find(t => t.id === termId);
+    const [
+      classRes,
+      sessionRes,
+      termRes,
+      schoolRes,
+      subjectsRes,
+      studentsRes,
+      scoresRes,
+      gradingRes,
+    ] = await Promise.all([
+      supabase.from('classes').select('*').eq('id', classId).eq('school_id', SCHOOL_ID).maybeSingle(),
+      supabase.from('academic_sessions').select('*').eq('id', sessionId).maybeSingle(),
+      supabase.from('academic_terms').select('*').eq('id', termId).maybeSingle(),
+      supabase.from('schools').select('*').eq('id', SCHOOL_ID).maybeSingle(),
+      supabase.from('subjects').select('*').eq('school_id', SCHOOL_ID).order('subject_order'),
+      supabase.from('students').select('*').eq('school_id', SCHOOL_ID).eq('class_id', classId).eq('status', 'active').order('last_name'),
+      supabase.from('scores').select('*').eq('school_id', SCHOOL_ID).eq('class_id', classId).eq('session_id', sessionId).eq('term_id', termId),
+      supabase.from('grading_scale').select('*').order('min_score'),
+    ]);
 
-    const { rows, classAverage } = db.getBroadsheet(classId, sessionId, termId);
+    for (const result of [classRes, sessionRes, termRes, schoolRes, subjectsRes, studentsRes, scoresRes, gradingRes]) {
+      if (result.error) throw result.error;
+    }
 
-    // Get subjects for columns
-    const subjects = [...database.subjects].sort((a, b) => a.order - b.order);
+    if (!classRes.data || !sessionRes.data || !termRes.data) {
+      return NextResponse.json({ error: 'Class, session, or term not found' }, { status: 404 });
+    }
 
-    // Compute summary stats
-    const totalStudents = rows.length;
-    const passedOverall = rows.filter(r => r.averageScore >= 40).length;
-    const overallPassRate = totalStudents > 0 ? Number(((passedOverall / totalStudents) * 100).toFixed(1)) : 0;
-    const highestAverage = rows.length > 0 ? Math.max(...rows.map(r => r.averageScore)) : 0;
-    const lowestAverage = rows.length > 0 ? Math.min(...rows.map(r => r.averageScore)) : 0;
+    const subjects = (subjectsRes.data || []).map((subject) => ({
+      id: subject.id,
+      name: subject.name,
+      code: subject.code,
+      order: subject.subject_order,
+    }));
+
+    const gradingScale = gradingRes.data || [];
+    const scores = scoresRes.data || [];
+
+    const rows = (studentsRes.data || []).map((student) => {
+      const studentScores = scores.filter((score) => score.student_id === student.id);
+      const subjectScores = subjects.map((subject) => {
+        const score = studentScores.find((item) => item.subject_id === subject.id);
+        return {
+          subjectId: subject.id,
+          subjectName: subject.name,
+          caTotal: Number(score?.ca_total || 0),
+          exam: Number(score?.exam || 0),
+          total: Number(score?.overall_total || 0),
+          grade: score?.grade || '',
+          remark: score?.remark || '',
+        };
+      });
+
+      const recordedScores = studentScores.filter((score) => score.overall_total !== null);
+      const totalScore = recordedScores.reduce((sum, score) => sum + Number(score.overall_total || 0), 0);
+      const averageScore = recordedScores.length
+        ? Number((totalScore / recordedScores.length).toFixed(2))
+        : 0;
+
+      const overallGrade = gradingScale.find(
+        (item) => averageScore >= Number(item.min_score) && averageScore <= Number(item.max_score)
+      );
+
+      return {
+        studentId: student.id,
+        admissionNumber: student.admission_number,
+        studentName: `${student.last_name} ${student.first_name} ${student.middle_name || ''}`.trim(),
+        subjectScores,
+        totalScore,
+        averageScore,
+        overallGrade: overallGrade?.grade || '',
+        overallRemark: overallGrade?.remark || '',
+        passedCount: recordedScores.filter((score) => Number(score.overall_total) >= 40).length,
+        failedCount: recordedScores.filter((score) => Number(score.overall_total) < 40).length,
+      };
+    });
+
+    rows.sort((a, b) => b.averageScore - a.averageScore || b.totalScore - a.totalScore);
+
+    let previousAverage: number | null = null;
+    let currentPosition = 0;
+
+    const rankedRows = rows.map((row, index) => {
+      if (row.averageScore !== previousAverage) {
+        currentPosition = index + 1;
+        previousAverage = row.averageScore;
+      }
+      return { ...row, position: currentPosition };
+    });
+
+    const classAverage = rows.length
+      ? Number((rows.reduce((sum, row) => sum + row.averageScore, 0) / rows.length).toFixed(2))
+      : 0;
 
     return NextResponse.json({
-      className: classObj ? classObj.name : 'Unknown Class',
-      sessionName: sessionObj ? sessionObj.name : '',
-      termName: termObj ? termObj.name : '',
-      school: database.school,
+      class: classRes.data,
+      session: sessionRes.data,
+      term: termRes.data,
+      school: schoolRes.data ? {
+        id: schoolRes.data.id,
+        name: schoolRes.data.name,
+        motto: schoolRes.data.motto,
+        address: schoolRes.data.address,
+        phone: schoolRes.data.phone,
+        email: schoolRes.data.email,
+        logoUrl: schoolRes.data.logo_url,
+        headTeacher: schoolRes.data.head_teacher,
+      } : null,
       subjects,
-      rows,
-      statistics: {
-        totalStudents,
+      rows: rankedRows,
+      stats: {
+        totalStudents: rows.length,
         classAverage,
-        overallPassRate,
-        highestAverage,
-        lowestAverage,
+        passedOverall: rows.filter((row) => row.averageScore >= 40).length,
+        failedOverall: rows.filter((row) => row.averageScore < 40).length,
+        highestAverage: rows.length ? Math.max(...rows.map((row) => row.averageScore)) : 0,
+        lowestAverage: rows.length ? Math.min(...rows.map((row) => row.averageScore)) : 0,
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to generate broadsheet' }, { status: 500 });
+    console.error('Fetch broadsheet error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch broadsheet' },
+      { status: 500 }
+    );
   }
 }

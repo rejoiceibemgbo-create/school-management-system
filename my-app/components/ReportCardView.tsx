@@ -17,7 +17,7 @@ import {
   CheckCircle2
 } from 'lucide-react';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
+import html2canvas from 'html2canvas-pro';
 import { AcademicSession, AcademicTerm, SchoolClass, StudentReportSummary, School } from '@/lib/types';
 
 export default function ReportCardView() {
@@ -82,29 +82,47 @@ export default function ReportCardView() {
       setLoading(true);
       const res = await fetch(`/api/report-card?classId=${selectedClass}&sessionId=${selectedSession}&termId=${selectedTerm}`);
       const data = await res.json();
+console.log('REPORT CARD STATUS:', res.status);
+console.log('REPORT CARD DATA:', JSON.stringify(data, null, 2));
 
-      if (data.reportCards) {
-        setReportCards(data.reportCards);
-        setSchool(data.school);
-        setMetaInfo({
-          sessionName: data.sessionName,
-          termName: data.termName,
-          nextTermBegins: data.nextTermBegins,
-          totalSchoolDays: data.totalSchoolDays,
-          gradingScale: data.gradingScale,
-        });
+     if (!res.ok) {
+  throw new Error(data.error || 'Failed to load report cards');
+}
 
-        if (data.reportCards.length > 0) {
-          if (!selectedStudentId || !data.reportCards.some((r: any) => r.student.id === selectedStudentId)) {
-            setSelectedStudentId(data.reportCards[0].student.id);
-          }
-          // Default all selected for bulk
-          setSelectedBulkIds(data.reportCards.map((r: any) => r.student.id));
-        } else {
-          setSelectedStudentId('');
-          setSelectedBulkIds([]);
-        }
-      }
+if (data.reportCards) {
+  // Save the report cards received from the API
+  setReportCards(data.reportCards);
+
+  // Save school information
+  setSchool(data.school || null);
+
+  // Save academic information
+  setMetaInfo({
+    sessionName: data.sessionName,
+    termName: data.termName,
+    nextTermBegins: data.nextTermBegins,
+    totalSchoolDays: data.totalSchoolDays,
+    gradingScale: data.gradingScale,
+  });
+
+  if (data.reportCards.length > 0) {
+    if (
+      !selectedStudentId ||
+      !data.reportCards.some(
+        (r: any) => r.student.id === selectedStudentId
+      )
+    ) {
+      setSelectedStudentId(data.reportCards[0].student.id);
+    }
+
+    setSelectedBulkIds(
+      data.reportCards.map((r: any) => r.student.id)
+    );
+  } else {
+    setSelectedStudentId('');
+    setSelectedBulkIds([]);
+  }
+}
     } catch (err) {
       console.error(err);
     } finally {
@@ -131,7 +149,11 @@ export default function ReportCardView() {
   // Generate and Download PDF using jsPDF
   const handleDownloadPDF = async (singleOnly: boolean = false) => {
     const element = printContainerRef.current;
-    if (!element) return;
+
+    if (!element) {
+      alert('Report card container was not found. Please refresh and try again.');
+      return;
+    }
 
     try {
       setGeneratingPdf(true);
@@ -142,39 +164,123 @@ export default function ReportCardView() {
 
       if (cardsToRender.length === 0) {
         alert('No report cards selected.');
-        setGeneratingPdf(false);
         return;
       }
 
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const cardElements = element.querySelectorAll<HTMLElement>('.single-report-card');
+      // Only capture the report cards currently displayed in the selected view.
+      const cardElements = Array.from(
+        element.querySelectorAll<HTMLElement>('.single-report-card')
+      );
+
+      if (cardElements.length === 0) {
+        throw new Error('No report cards are currently displayed. Please wait for them to load and try again.');
+      }
+
+      if (cardElements.length !== cardsToRender.length) {
+        throw new Error(
+          `The number of displayed report cards (${cardElements.length}) does not match the selected pupils (${cardsToRender.length}). Please try again.`
+        );
+      }
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true,
+      });
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 5;
+      const usableWidth = pageWidth - margin * 2;
+      const usableHeight = pageHeight - margin * 2;
 
       for (let i = 0; i < cardElements.length; i++) {
         const cardEl = cardElements[i];
 
+        // Wait for report-card images to finish loading before capturing.
+        const images = Array.from(cardEl.querySelectorAll('img'));
+
+        await Promise.all(
+          images.map(async image => {
+            if (!image.complete) {
+              await new Promise<void>(resolve => {
+                const finish = () => resolve();
+                image.addEventListener('load', finish, { once: true });
+                image.addEventListener('error', finish, { once: true });
+              });
+            }
+
+            if (image.decode) {
+              try {
+                await image.decode();
+              } catch {
+                // An unavailable image should not stop the report from downloading.
+              }
+            }
+          })
+        );
+
         const canvas = await html2canvas(cardEl, {
           scale: 2,
           useCORS: true,
+          allowTaint: false,
           logging: false,
           backgroundColor: '#ffffff',
+          imageTimeout: 15000,
+          windowWidth: Math.max(cardEl.scrollWidth, cardEl.offsetWidth),
+          windowHeight: Math.max(cardEl.scrollHeight, cardEl.offsetHeight),
+          scrollX: 0,
+          scrollY: 0,
         });
 
-        const imgData = canvas.toDataURL('image/png');
-        const pdfWidth = 210;
-        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+        if (!canvas.width || !canvas.height) {
+          throw new Error(`Could not capture report card ${i + 1}.`);
+        }
 
-        if (i > 0) pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, Math.min(297, pdfHeight));
+        const imageData = canvas.toDataURL('image/jpeg', 0.95);
+
+        // Fit the complete report card inside one A4 page without cropping it.
+        const widthRatio = usableWidth / canvas.width;
+        const heightRatio = usableHeight / canvas.height;
+        const scale = Math.min(widthRatio, heightRatio);
+
+        const imageWidth = canvas.width * scale;
+        const imageHeight = canvas.height * scale;
+        const x = (pageWidth - imageWidth) / 2;
+        const y = margin + (usableHeight - imageHeight) / 2;
+
+        if (i > 0) {
+          pdf.addPage();
+        }
+
+        pdf.addImage(
+          imageData,
+          'JPEG',
+          x,
+          y,
+          imageWidth,
+          imageHeight,
+          undefined,
+          'FAST'
+        );
       }
 
       const targetName = singleOnly && cardsToRender[0]
         ? `${cardsToRender[0].student.lastName}_${cardsToRender[0].student.firstName}`
         : `${classes.find(c => c.id === selectedClass)?.name || 'Class'}_Report_Cards`;
 
-      pdf.save(`${targetName}_${metaInfo.termName || 'Term'}.pdf`);
+      const safeTargetName = targetName.replace(/[<>:"/\\|?*]/g, '_');
+      const safeTermName = String(metaInfo.termName || 'Term').replace(/[<>:"/\\|?*]/g, '_');
+
+      pdf.save(`${safeTargetName}_${safeTermName}.pdf`);
     } catch (err) {
       console.error('PDF generation error:', err);
-      alert('Could not generate PDF. You can also click "Print" and choose "Save as PDF"!');
+
+      const message = err instanceof Error ? err.message : String(err);
+      alert(
+        `Could not generate PDF: ${message}\n\nPlease try the Print button and choose "Save as PDF".`
+      );
     } finally {
       setGeneratingPdf(false);
     }
@@ -309,7 +415,6 @@ export default function ReportCardView() {
             </div>
           </div>
         </div>
-
         {/* Secondary Selector Row */}
         {viewMode === 'single' ? (
           <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2 text-xs">
@@ -353,8 +458,8 @@ export default function ReportCardView() {
                     key={r.student.id}
                     onClick={() => handleToggleBulkSelect(r.student.id)}
                     className={`px-2 py-0.5 rounded text-[11px] font-medium border transition-colors ${isSelected
-                        ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
-                        : 'bg-slate-50 border-slate-200 text-slate-400'
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
+                      : 'bg-slate-50 border-slate-200 text-slate-400'
                       }`}
                   >
                     {r.student.lastName} {r.student.firstName.charAt(0)}.
@@ -511,10 +616,10 @@ export default function ReportCardView() {
                               <td className="p-1 border border-slate-300 text-center font-mono font-black bg-emerald-50/50 text-slate-900">{sc.overallTotal}</td>
                               <td className="p-1 border border-slate-300 text-center font-black">
                                 <span className={`inline-block px-1 rounded text-[10px] ${sc.grade === 'A' ? 'text-emerald-800' :
-                                    sc.grade === 'B' ? 'text-blue-800' :
-                                      sc.grade === 'C' ? 'text-cyan-800' :
-                                        sc.grade === 'D' ? 'text-amber-800' :
-                                          sc.grade === 'E' ? 'text-orange-800' : 'text-rose-700'
+                                  sc.grade === 'B' ? 'text-blue-800' :
+                                    sc.grade === 'C' ? 'text-cyan-800' :
+                                      sc.grade === 'D' ? 'text-amber-800' :
+                                        sc.grade === 'E' ? 'text-orange-800' : 'text-rose-700'
                                   }`}>
                                   {sc.grade}
                                 </span>
@@ -675,4 +780,3 @@ export default function ReportCardView() {
     </div>
   );
 }
-

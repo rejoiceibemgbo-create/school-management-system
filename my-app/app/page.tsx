@@ -1,3 +1,4 @@
+
 'use client';
 
 import React, { useState, useEffect } from 'react';
@@ -35,6 +36,7 @@ export default function Home() {
   const loadInitialData = async () => {
     try {
       setLoading(true);
+
       const [authRes, sessRes, setRes] = await Promise.all([
         fetch('/api/auth'),
         fetch('/api/sessions'),
@@ -44,23 +46,35 @@ export default function Home() {
       const authData = await authRes.json();
       const sessData = await sessRes.json();
       const setData = await setRes.json();
+if (authRes.ok && authData.user) {
+  setCurrentUser(authData.user);
 
-      if (authData.users) {
-        setAllUsers(authData.users);
+  // Load the registered school users for the navbar dropdown.
+  const usersRes = await fetch('/api/users');
+  const usersData = await usersRes.json();
 
-        // Check localStorage for saved session user or default to Admin
-        const savedUserId = typeof window !== 'undefined' ? localStorage.getItem('hhec_user_id') : null;
-        const matched = authData.users.find((u: User) => u.id === savedUserId);
-        if (matched) {
-          setCurrentUser(matched);
-        } else {
-          setCurrentUser(authData.users[1] || authData.users[0]); // School Admin default
-        }
+  if (usersRes.ok && Array.isArray(usersData.users)) {
+    setAllUsers(usersData.users);
+  } else {
+    setAllUsers([]);
+    console.error('Unable to load school users:', usersData.error);
+  }
+} else {
+  setCurrentUser(null);
+  setAllUsers([]);
+}
+
+      if (sessData.currentSession) {
+        setCurrentSession(sessData.currentSession);
       }
 
-      if (sessData.currentSession) setCurrentSession(sessData.currentSession);
-      if (sessData.currentTerm) setCurrentTerm(sessData.currentTerm);
-      if (setData.school) setSchool(setData.school);
+      if (sessData.currentTerm) {
+        setCurrentTerm(sessData.currentTerm);
+      }
+
+      if (setData.school) {
+        setSchool(setData.school);
+      }
     } catch (err) {
       console.error('Initialization error:', err);
     } finally {
@@ -74,15 +88,23 @@ export default function Home() {
 
   const handleSwitchUser = (user: User) => {
     setCurrentUser(user);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('hhec_user_id', user.id);
-    }
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('hhec_user_id');
+  const handleLogout = async () => {
+    try {
+      const response = await fetch('/api/auth', {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        alert('Logout failed. Please try again.');
+        return;
+      }
+
+      setCurrentUser(null);
+    } catch (error) {
+      console.error('Logout error:', error);
+      alert('Unable to log out. Please try again.');
     }
   };
 
@@ -91,6 +113,7 @@ export default function Home() {
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="flex flex-col items-center space-y-3">
           <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+
           <p className="text-sm font-semibold text-white tracking-wide">
             Loading School Result Management System...
           </p>
@@ -105,9 +128,6 @@ export default function Home() {
       <LoginView
         onLoginSuccess={(user) => {
           setCurrentUser(user);
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('hhec_user_id', user.id);
-          }
         }}
         school={school}
         users={allUsers}

@@ -1,71 +1,147 @@
+
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import { Subject } from '@/lib/types';
+
+const SCHOOL_ID = 'sch_happy_home';
+
+function mapSubject(row: any): Subject {
+  return {
+    id: row.id,
+    schoolId: row.school_id,
+    name: row.name,
+    code: row.code,
+    category: row.category,
+    isDefault: row.is_default,
+    order: row.subject_order,
+  };
+}
 
 export async function GET() {
   try {
-    const database = db.read();
-    const subjects = [...database.subjects].sort((a, b) => a.order - b.order);
-    return NextResponse.json({ subjects });
+    const { data, error } = await supabase
+      .from('subjects')
+      .select('*')
+      .eq('school_id', SCHOOL_ID)
+      .order('subject_order', { ascending: true });
+
+    if (error) throw error;
+
+    return NextResponse.json({
+      subjects: (data || []).map(mapSubject),
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch subjects' }, { status: 500 });
+    console.error('Fetch subjects error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch subjects' },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const database = db.read();
 
     if (!body.name?.trim() || !body.code?.trim()) {
-      return NextResponse.json({ error: 'Subject name and code are required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Subject name and code are required' },
+        { status: 400 }
+      );
     }
 
-    const nextOrder = database.subjects.length > 0 ? Math.max(...database.subjects.map(s => s.order)) + 1 : 1;
+    const { data: lastSubject, error: orderError } = await supabase
+      .from('subjects')
+      .select('subject_order')
+      .eq('school_id', SCHOOL_ID)
+      .order('subject_order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const newSubject: Subject = {
+    if (orderError) throw orderError;
+
+    const nextOrder = (lastSubject?.subject_order || 0) + 1;
+
+    const newSubject = {
       id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      schoolId: database.school.id,
+      school_id: SCHOOL_ID,
       name: body.name.trim(),
       code: body.code.trim().toUpperCase(),
       category: body.category || 'core',
-      isDefault: false,
-      order: body.order ? Number(body.order) : nextOrder,
+      is_default: false,
+      subject_order: body.order ? Number(body.order) : nextOrder,
     };
 
-    database.subjects.push(newSubject);
-    db.write(database);
-    db.logAudit('admin', 'Administrator', 'CREATE_SUBJECT', 'subject', newSubject.id, `Created subject: ${newSubject.name}`);
+    const { data, error } = await supabase
+      .from('subjects')
+      .insert(newSubject)
+      .select()
+      .single();
 
-    return NextResponse.json({ success: true, subject: newSubject });
+    if (error) throw error;
+
+    return NextResponse.json({
+      success: true,
+      subject: mapSubject(data),
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to create subject' }, { status: 500 });
+    console.error('Create subject error:', error);
+    return NextResponse.json(
+      { error: 'Failed to create subject' },
+      { status: 500 }
+    );
   }
 }
 
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const database = db.read();
 
-    const index = database.subjects.findIndex(s => s.id === body.id);
-    if (index === -1) {
-      return NextResponse.json({ error: 'Subject not found' }, { status: 404 });
+    if (!body.id) {
+      return NextResponse.json(
+        { error: 'Subject ID is required' },
+        { status: 400 }
+      );
     }
 
-    database.subjects[index] = {
-      ...database.subjects[index],
-      ...body,
-    };
+    const updates: Record<string, unknown> = {};
 
-    db.write(database);
-    db.logAudit('admin', 'Administrator', 'UPDATE_SUBJECT', 'subject', body.id, `Updated subject: ${database.subjects[index].name}`);
+    if (body.name !== undefined) updates.name = body.name.trim();
+    if (body.code !== undefined) updates.code = body.code.trim().toUpperCase();
+    if (body.category !== undefined) updates.category = body.category;
+    if (body.isDefault !== undefined) updates.is_default = body.isDefault;
+    if (body.order !== undefined) updates.subject_order = Number(body.order);
 
-    return NextResponse.json({ success: true, subject: database.subjects[index] });
+    const { data, error } = await supabase
+      .from('subjects')
+      .update(updates)
+      .eq('id', body.id)
+      .eq('school_id', SCHOOL_ID)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+      return NextResponse.json(
+        { error: 'Subject not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      subject: mapSubject(data),
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to update subject' }, { status: 500 });
+    console.error('Update subject error:', error);
+    return NextResponse.json(
+      { error: 'Failed to update subject' },
+      { status: 500 }
+    );
   }
 }
+
 
 export async function DELETE(request: Request) {
   try {
@@ -73,22 +149,64 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id');
 
     if (!id) {
-      return NextResponse.json({ error: 'Subject ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Subject ID is required' },
+        { status: 400 }
+      );
     }
 
-    const database = db.read();
-    const index = database.subjects.findIndex(s => s.id === id);
-    if (index === -1) {
-      return NextResponse.json({ error: 'Subject not found' }, { status: 404 });
+    const { data, error } = await supabase
+      .from('subjects')
+      .delete()
+      .eq('id', id)
+      .eq('school_id', SCHOOL_ID)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      console.error('Supabase subject deletion error:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+
+      return NextResponse.json(
+        { error: error.message || 'Database could not delete the subject' },
+        { status: 500 }
+      );
     }
 
-    const deleted = database.subjects.splice(index, 1)[0];
-    db.write(database);
-    db.logAudit('admin', 'Administrator', 'DELETE_SUBJECT', 'subject', id, `Deleted subject: ${deleted.name}`);
+    if (!data) {
+      return NextResponse.json(
+        { error: 'Subject not found. It may already have been deleted.' },
+        { status: 404 }
+      );
+    }
 
-    return NextResponse.json({ success: true, message: 'Subject deleted successfully' });
+    return NextResponse.json({
+      success: true,
+      message: 'Subject deleted successfully',
+    });
+
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete subject' }, { status: 500 });
+    console.error('Delete subject request failed:', error);
+
+    const message =
+      error instanceof Error ? error.message : 'Unknown deletion error';
+
+    const isConnectionError =
+      message.toLowerCase().includes('fetch failed') ||
+      message.toLowerCase().includes('socket');
+
+    return NextResponse.json(
+      {
+        error: isConnectionError
+          ? 'Could not connect to the database. Please try again.'
+          : 'Failed to delete subject.',
+      },
+      { status: isConnectionError ? 503 : 500 }
+    );
   }
 }
 

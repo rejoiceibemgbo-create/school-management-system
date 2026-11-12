@@ -1,157 +1,319 @@
+
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { Student } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+
+const SCHOOL_ID = 'sch_happy_home';
+
+function formatStudent(student: any, className = '') {
+  return {
+    id: student.id,
+    schoolId: student.school_id,
+    admissionNumber: student.admission_number,
+    firstName: student.first_name,
+    lastName: student.last_name,
+    middleName: student.middle_name,
+    gender: student.gender,
+    dateOfBirth: student.date_of_birth,
+    classId: student.class_id,
+    className,
+    photoUrl: student.photo_url,
+    parentName: student.parent_name,
+    parentPhone: student.parent_phone,
+    parentEmail: student.parent_email,
+    homeAddress: student.home_address,
+    admissionDate: student.admission_date,
+    status: student.status,
+    createdAt: student.created_at,
+    updatedAt: student.updated_at,
+  };
+}
+
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const classId = searchParams.get('classId');
     const status = searchParams.get('status');
-    const search = searchParams.get('search')?.toLowerCase();
+    const search = searchParams.get('search');
 
-    const database = db.read();
-    let students = [...database.students];
+    let query = supabase
+      .from('students')
+      .select('*')
+      .eq('school_id', SCHOOL_ID)
+      .order('created_at', { ascending: false });
 
     if (classId && classId !== 'all') {
-      students = students.filter(s => s.classId === classId);
+      query = query.eq('class_id', classId);
     }
 
     if (status && status !== 'all') {
-      students = students.filter(s => s.status === status);
+      query = query.eq('status', status);
     }
 
-    if (search) {
-      students = students.filter(s => 
-        s.firstName.toLowerCase().includes(search) ||
-        s.lastName.toLowerCase().includes(search) ||
-        (s.middleName && s.middleName.toLowerCase().includes(search)) ||
-        s.admissionNumber.toLowerCase().includes(search) ||
-        s.parentPhone.includes(search) ||
-        s.parentName.toLowerCase().includes(search)
+    if (search?.trim()) {
+      const term = search.trim().replace(/[%,().]/g, '');
+      query = query.or(
+        `first_name.ilike.%${term}%,last_name.ilike.%${term}%,admission_number.ilike.%${term}%`
       );
     }
 
-    // Attach class name
-    const studentsWithClass = students.map(student => {
-      const cls = database.classes.find(c => c.id === student.classId);
-      return {
-        ...student,
-        className: cls ? cls.name : 'Unknown Class',
-      };
-    });
+    const { data: students, error } = await query;
+
+    if (error) {
+      console.error('Fetch students error:', error.message);
+      return NextResponse.json(
+        { error: 'Failed to fetch students' },
+        { status: 500 }
+      );
+    }
+
+    const classIds = [
+      ...new Set((students || []).map(student => student.class_id))
+    ];
+
+    const classNames: Record<string, string> = {};
+
+    if (classIds.length > 0) {
+      const { data: classes } = await supabase
+        .from('classes')
+        .select('id, name')
+        .in('id', classIds);
+
+      for (const schoolClass of classes || []) {
+        classNames[schoolClass.id] = schoolClass.name;
+      }
+    }
+
+    const formattedStudents = await Promise.all(
+      (students || []).map(async student => {
+        let photoUrl = '';
+
+        if (student.photo_url) {
+          const { data: signedPhoto, error: photoError } =
+            await supabase.storage
+              .from('student-photos')
+              .createSignedUrl(student.photo_url, 3600);
+
+          if (!photoError && signedPhoto?.signedUrl) {
+            photoUrl = signedPhoto.signedUrl;
+          } else {
+            console.error(
+              'Student photo URL error:',
+              photoError?.message
+            );
+          }
+        }
+
+        return {
+          ...formatStudent(
+            student,
+            classNames[student.class_id] || ''
+          ),
+          photoUrl,
+        };
+      })
+    );
 
     return NextResponse.json({
-      students: studentsWithClass,
-      total: students.length,
+      students: formattedStudents,
+      total: formattedStudents.length,
     });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 });
+    console.error('Fetch students error:', error);
+
+    return NextResponse.json(
+      { error: 'Failed to fetch students' },
+      { status: 500 }
+    );
   }
 }
+
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const database = db.read();
 
-    const admissionNumber = body.admissionNumber?.trim() || db.generateAdmissionNumber();
-
-    // Check duplicate admission number
-    const existing = database.students.find(
-      s => s.admissionNumber.toLowerCase() === admissionNumber.toLowerCase()
-    );
-    if (existing) {
-      return NextResponse.json({ error: 'A student with this admission number already exists' }, { status: 400 });
-    }
-
-    if (!body.firstName?.trim() || !body.lastName?.trim()) {
-      return NextResponse.json({ error: 'First name and last name are required' }, { status: 400 });
-    }
-
-    if (!body.classId) {
-      return NextResponse.json({ error: 'Class assignment is required' }, { status: 400 });
-    }
-
-    const newStudent: Student = {
-      id: `std_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      schoolId: database.school.id,
+    const {
+      firstName,
+      lastName,
+      middleName,
+      gender,
+      dateOfBirth,
+      classId,
+      photoUrl,
+      parentName,
+      parentPhone,
+      parentEmail,
+      homeAddress,
       admissionNumber,
-      firstName: body.firstName.trim(),
-      lastName: body.lastName.trim(),
-      middleName: body.middleName?.trim() || '',
-      gender: body.gender || 'Male',
-      dateOfBirth: body.dateOfBirth || '2018-01-01',
-      classId: body.classId,
-      photoUrl: body.photoUrl || '',
-      parentName: body.parentName?.trim() || '',
-      parentPhone: body.parentPhone?.trim() || '',
-      parentEmail: body.parentEmail?.trim() || '',
-      homeAddress: body.homeAddress?.trim() || '',
-      admissionDate: body.admissionDate || new Date().toISOString().split('T')[0],
-      status: body.status || 'active',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      admissionDate,
+    } = body;
+
+    if (!firstName || !lastName || !classId) {
+      return NextResponse.json(
+        { error: 'First name, last name and class are required' },
+        { status: 400 }
+      );
+    }
+
+    const { data: schoolClass, error: classError } = await supabase
+      .from('classes')
+      .select('id')
+      .eq('id', classId)
+      .eq('school_id', SCHOOL_ID)
+      .maybeSingle();
+
+    if (classError || !schoolClass) {
+      return NextResponse.json(
+        { error: 'Selected class was not found' },
+        { status: 400 }
+      );
+    }
+
+    const finalAdmissionNumber =
+      admissionNumber?.trim() ||
+      `HH-${new Date().getFullYear()}-${Date.now()}`;
+
+    const { data: existingStudent } = await supabase
+      .from('students')
+      .select('id')
+      .eq('admission_number', finalAdmissionNumber)
+      .maybeSingle();
+
+    if (existingStudent) {
+      return NextResponse.json(
+        { error: 'Admission number already exists' },
+        { status: 409 }
+      );
+    }
+
+    const newStudent = {
+      id: `std_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      school_id: SCHOOL_ID,
+      admission_number: finalAdmissionNumber,
+      first_name: firstName.trim(),
+      last_name: lastName.trim(),
+      middle_name: middleName || null,
+      gender: gender || 'Male',
+      date_of_birth: dateOfBirth || '2018-01-01',
+      class_id: classId,
+      photo_url: photoUrl || null,
+      parent_name: parentName || '',
+      parent_phone: parentPhone || '',
+      parent_email: parentEmail || null,
+      home_address: homeAddress || '',
+      admission_date: admissionDate || new Date().toISOString().split('T')[0],
+      status: 'active',
     };
 
-    database.students.push(newStudent);
-    db.write(database);
-    db.logAudit(
-      'admin',
-      'Administrator',
-      'CREATE_STUDENT',
-      'student',
-      newStudent.id,
-      `Registered student ${newStudent.firstName} ${newStudent.lastName} (${newStudent.admissionNumber})`
-    );
+    const { data: student, error } = await supabase
+      .from('students')
+      .insert(newStudent)
+      .select('*')
+      .single();
 
-    return NextResponse.json({ success: true, student: newStudent });
+    if (error) {
+      console.error('Create student error:', error.message);
+
+      return NextResponse.json(
+        { error: 'Failed to register student' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        success: true,
+        message: 'Student registered successfully',
+        student: formatStudent(student),
+      },
+      { status: 201 }
+    );
   } catch (error) {
-    console.error('Error creating student:', error);
-    return NextResponse.json({ error: 'Failed to register student' }, { status: 500 });
+    console.error('Create student error:', error);
+
+    return NextResponse.json(
+      { error: 'Failed to register student' },
+      { status: 500 }
+    );
   }
 }
 
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const database = db.read();
+    const { id } = body;
 
-    const index = database.students.findIndex(s => s.id === body.id);
-    if (index === -1) {
-      return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+    if (!id) {
+      return NextResponse.json(
+        { error: 'Student ID is required' },
+        { status: 400 }
+      );
     }
 
-    const current = database.students[index];
+    const updates: Record<string, any> = {
+      updated_at: new Date().toISOString(),
+    };
 
-    // Check admission number conflict if changed
-    if (body.admissionNumber && body.admissionNumber !== current.admissionNumber) {
-      const conflict = database.students.find(
-        s => s.id !== body.id && s.admissionNumber.toLowerCase() === body.admissionNumber.toLowerCase()
-      );
-      if (conflict) {
-        return NextResponse.json({ error: 'Admission number already in use by another student' }, { status: 400 });
+    const fields: Record<string, string> = {
+      admissionNumber: 'admission_number',
+      firstName: 'first_name',
+      lastName: 'last_name',
+      middleName: 'middle_name',
+      gender: 'gender',
+      dateOfBirth: 'date_of_birth',
+      classId: 'class_id',
+      photoUrl: 'photo_url',
+      parentName: 'parent_name',
+      parentPhone: 'parent_phone',
+      parentEmail: 'parent_email',
+      homeAddress: 'home_address',
+      admissionDate: 'admission_date',
+      status: 'status',
+    };
+
+    for (const [key, column] of Object.entries(fields)) {
+      if (body[key] !== undefined) {
+        updates[column] = body[key];
       }
     }
 
-    database.students[index] = {
-      ...current,
-      ...body,
-      updatedAt: new Date().toISOString(),
-    };
+    const { data: student, error } = await supabase
+      .from('students')
+      .update(updates)
+      .eq('id', id)
+      .eq('school_id', SCHOOL_ID)
+      .select('*')
+      .maybeSingle();
 
-    db.write(database);
-    db.logAudit(
-      'admin',
-      'Administrator',
-      'UPDATE_STUDENT',
-      'student',
-      body.id,
-      `Updated student information for ${database.students[index].firstName} ${database.students[index].lastName}`
-    );
+    if (error) {
+      console.error('Update student error:', error.message);
 
-    return NextResponse.json({ success: true, student: database.students[index] });
+      return NextResponse.json(
+        { error: 'Failed to update student' },
+        { status: 500 }
+      );
+    }
+
+    if (!student) {
+      return NextResponse.json(
+        { error: 'Student not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Student updated successfully',
+      student: formatStudent(student),
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to update student' }, { status: 500 });
+    console.error('Update student error:', error);
+
+    return NextResponse.json(
+      { error: 'Failed to update student' },
+      { status: 500 }
+    );
   }
 }
 
@@ -161,31 +323,46 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id');
 
     if (!id) {
-      return NextResponse.json({ error: 'Student ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Student ID is required' },
+        { status: 400 }
+      );
     }
 
-    const database = db.read();
-    const index = database.students.findIndex(s => s.id === id);
-    if (index === -1) {
-      return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+    const { data: student, error } = await supabase
+      .from('students')
+      .delete()
+      .eq('id', id)
+      .eq('school_id', SCHOOL_ID)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      console.error('Delete student error:', error.message);
+
+      return NextResponse.json(
+        { error: 'Failed to delete student' },
+        { status: 500 }
+      );
     }
 
-    const student = database.students[index];
-    // Archive or remove
-    database.students.splice(index, 1);
-    db.write(database);
+    if (!student) {
+      return NextResponse.json(
+        { error: 'Student not found' },
+        { status: 404 }
+      );
+    }
 
-    db.logAudit(
-      'admin',
-      'Administrator',
-      'DELETE_STUDENT',
-      'student',
-      id,
-      `Removed student record: ${student.firstName} ${student.lastName} (${student.admissionNumber})`
-    );
-
-    return NextResponse.json({ success: true, message: 'Student removed successfully' });
+    return NextResponse.json({
+      success: true,
+      message: 'Student deleted successfully',
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete student' }, { status: 500 });
+    console.error('Delete student error:', error);
+
+    return NextResponse.json(
+      { error: 'Failed to delete student' },
+      { status: 500 }
+    );
   }
 }

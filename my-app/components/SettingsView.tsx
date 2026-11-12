@@ -1,15 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Settings, 
-  Save, 
-  School as SchoolIcon, 
-  Award, 
-  Database, 
-  Download, 
-  Upload, 
-  CheckCircle2, 
+import {
+  Settings,
+  Save,
+  School as SchoolIcon,
+  Award,
+  Database,
+  Download,
+  Upload,
+  CheckCircle2,
   AlertCircle,
   RefreshCw
 } from 'lucide-react';
@@ -180,25 +180,22 @@ export default function SettingsView({ onSchoolUpdated }: SettingsViewProps) {
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setActiveTab('school')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'school' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'school' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
             >
               School Profile
             </button>
             <button
               onClick={() => setActiveTab('grading')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'grading' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'grading' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
             >
               Grading Scales
             </button>
             <button
               onClick={() => setActiveTab('backup')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                activeTab === 'backup' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-              }`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${activeTab === 'backup' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
             >
               Database & Backup
             </button>
@@ -286,9 +283,10 @@ export default function SettingsView({ onSchoolUpdated }: SettingsViewProps) {
               <label className="block font-semibold text-slate-700 mb-1">Proprietor / Director Name</label>
               <input
                 type="text"
-                value={school.principalName}
-                onChange={e => setSchool({ ...school, principalName: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 text-slate-900"
+                value={school.principalName || ''}
+                onChange={e =>
+                  setSchool({ ...school, principalName: e.target.value })
+                }
               />
             </div>
           </div>

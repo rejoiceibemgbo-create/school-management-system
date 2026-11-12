@@ -1,6 +1,8 @@
+
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { ResultApproval } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+
+const SCHOOL_ID = 'sch_happy_home';
 
 export async function GET(request: Request) {
   try {
@@ -8,107 +10,193 @@ export async function GET(request: Request) {
     const sessionId = searchParams.get('sessionId');
     const termId = searchParams.get('termId');
 
-    const database = db.read();
-    let approvals = [...database.resultApprovals];
+    let query = supabase
+      .from('result_approvals')
+      .select('*')
+      .eq('school_id', SCHOOL_ID)
+      .order('submitted_at', { ascending: false });
 
-    if (sessionId) approvals = approvals.filter(a => a.sessionId === sessionId);
-    if (termId) approvals = approvals.filter(a => a.termId === termId);
+    if (sessionId) query = query.eq('session_id', sessionId);
+    if (termId) query = query.eq('term_id', termId);
 
-    const detailedApprovals = approvals.map(app => {
-      const cls = database.classes.find(c => c.id === app.classId);
-      const sub = database.subjects.find(s => s.id === app.subjectId);
-      const submitter = database.users.find(u => u.id === app.submittedBy);
-      const reviewer = database.users.find(u => u.id === app.reviewedBy);
+    const { data: approvals, error } = await query;
+
+    if (error) throw error;
+
+    const [classesRes, subjectsRes, usersRes] = await Promise.all([
+      supabase.from('classes').select('id, name'),
+      supabase.from('subjects').select('id, name'),
+      supabase.from('users').select('id, full_name'),
+    ]);
+
+    if (classesRes.error) throw classesRes.error;
+    if (subjectsRes.error) throw subjectsRes.error;
+    if (usersRes.error) throw usersRes.error;
+
+    const detailedApprovals = (approvals || []).map((app) => {
+      const cls = (classesRes.data || []).find((item) => item.id === app.class_id);
+      const sub = (subjectsRes.data || []).find((item) => item.id === app.subject_id);
+      const submitter = (usersRes.data || []).find((item) => item.id === app.submitted_by);
+      const reviewer = (usersRes.data || []).find((item) => item.id === app.reviewed_by);
+
       return {
-        ...app,
-        className: cls ? cls.name : 'Unknown Class',
-        subjectName: sub ? sub.name : 'All Subjects',
-        submitterName: submitter ? submitter.fullName : 'Teacher',
-        reviewerName: reviewer ? reviewer.fullName : undefined,
+        id: app.id,
+        schoolId: app.school_id,
+        sessionId: app.session_id,
+        termId: app.term_id,
+        classId: app.class_id,
+        subjectId: app.subject_id,
+        status: app.status,
+        submittedBy: app.submitted_by,
+        submittedAt: app.submitted_at,
+        reviewedBy: app.reviewed_by,
+        reviewedAt: app.reviewed_at,
+        rejectionReason: app.rejection_reason,
+        className: cls?.name || 'Unknown Class',
+        subjectName: sub?.name || 'All Subjects',
+        submitterName: submitter?.full_name || 'Teacher',
+        reviewerName: reviewer?.full_name,
       };
     });
 
     return NextResponse.json({ approvals: detailedApprovals });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch approvals' }, { status: 500 });
+    console.error('Fetch approvals error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch approvals' },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { action, approvalId, sessionId, termId, classId, subjectId, reviewerId, rejectionReason, submitterId } = body;
-    const database = db.read();
+
+    const {
+      action,
+      approvalId,
+      sessionId,
+      termId,
+      classId,
+      subjectId,
+      reviewerId,
+      rejectionReason,
+      submitterId,
+    } = body;
+
+    const now = new Date().toISOString();
 
     if (action === 'submit') {
-      const newApproval: ResultApproval = {
+      const newApproval = {
         id: `app_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        schoolId: database.school.id,
-        sessionId,
-        termId,
-        classId,
-        subjectId,
+        school_id: SCHOOL_ID,
+        session_id: sessionId,
+        term_id: termId,
+        class_id: classId,
+        subject_id: subjectId || null,
         status: 'pending',
-        submittedBy: submitterId || 'teacher',
-        submittedAt: new Date().toISOString(),
+        submitted_by: submitterId || null,
+        submitted_at: now,
       };
-      database.resultApprovals.unshift(newApproval);
-      db.write(database);
-      db.logAudit(submitterId || 'teacher', 'Teacher', 'SUBMIT_FOR_APPROVAL', 'approval', newApproval.id, `Submitted results for approval`);
-      return NextResponse.json({ success: true, approval: newApproval });
+
+      const { data, error } = await supabase
+        .from('result_approvals')
+        .insert(newApproval)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      await supabase.from('audit_logs').insert({
+        school_id: SCHOOL_ID,
+        user_id: submitterId || null,
+        user_name: 'Teacher',
+        action: 'SUBMIT_FOR_APPROVAL',
+        entity_type: 'approval',
+        entity_id: newApproval.id,
+        details: 'Submitted results for approval',
+      });
+
+      return NextResponse.json({ success: true, approval: data });
     }
 
-    if (action === 'approve') {
-      const index = database.resultApprovals.findIndex(a => a.id === approvalId);
-      if (index !== -1) {
-        database.resultApprovals[index].status = 'approved';
-        database.resultApprovals[index].reviewedBy = reviewerId;
-        database.resultApprovals[index].reviewedAt = new Date().toISOString();
+    if (action === 'approve' || action === 'reject') {
+      if (!approvalId) {
+        return NextResponse.json(
+          { error: 'Approval ID is required' },
+          { status: 400 }
+        );
       }
 
-      // Mark matching scores as approved
+      const isApproved = action === 'approve';
+      const newStatus = isApproved ? 'approved' : 'rejected';
+
+      const { data: updatedApproval, error: approvalError } = await supabase
+        .from('result_approvals')
+        .update({
+          status: newStatus,
+          reviewed_by: reviewerId || null,
+          reviewed_at: now,
+          ...(isApproved
+            ? {}
+            : { rejection_reason: rejectionReason || 'Needs correction' }),
+        })
+        .eq('id', approvalId)
+        .eq('school_id', SCHOOL_ID)
+        .select()
+        .single();
+
+      if (approvalError) throw approvalError;
+
       if (sessionId && termId && classId) {
-        database.scores.forEach(sc => {
-          if (sc.sessionId === sessionId && sc.termId === termId && sc.classId === classId) {
-            if (!subjectId || sc.subjectId === subjectId) {
-              sc.status = 'approved';
-            }
-          }
-        });
+        let scoresQuery = supabase
+          .from('scores')
+          .update({ status: isApproved ? 'approved' : 'draft' })
+          .eq('session_id', sessionId)
+          .eq('term_id', termId)
+          .eq('class_id', classId);
+
+        if (subjectId) {
+          scoresQuery = scoresQuery.eq('subject_id', subjectId);
+        }
+
+        const { error: scoresError } = await scoresQuery;
+        if (scoresError) throw scoresError;
       }
 
-      db.write(database);
-      db.logAudit(reviewerId || 'admin', 'Head Teacher / Admin', 'APPROVE_RESULTS', 'approval', approvalId, `Approved results`);
-      return NextResponse.json({ success: true, message: 'Results approved successfully' });
-    }
+      const auditAction = isApproved ? 'APPROVE_RESULTS' : 'REJECT_RESULTS';
+      const auditDetails = isApproved
+        ? 'Approved results'
+        : `Rejected results: ${rejectionReason || 'Needs correction'}`;
 
-    if (action === 'reject') {
-      const index = database.resultApprovals.findIndex(a => a.id === approvalId);
-      if (index !== -1) {
-        database.resultApprovals[index].status = 'rejected';
-        database.resultApprovals[index].reviewedBy = reviewerId;
-        database.resultApprovals[index].rejectionReason = rejectionReason || 'Needs correction';
-        database.resultApprovals[index].reviewedAt = new Date().toISOString();
-      }
+      const { error: auditError } = await supabase.from('audit_logs').insert({
+        school_id: SCHOOL_ID,
+        user_id: reviewerId || null,
+        user_name: 'Head Teacher / Admin',
+        action: auditAction,
+        entity_type: 'approval',
+        entity_id: approvalId,
+        details: auditDetails,
+      });
 
-      // Mark matching scores back to draft
-      if (sessionId && termId && classId) {
-        database.scores.forEach(sc => {
-          if (sc.sessionId === sessionId && sc.termId === termId && sc.classId === classId) {
-            if (!subjectId || sc.subjectId === subjectId) {
-              sc.status = 'draft';
-            }
-          }
-        });
-      }
+      if (auditError) throw auditError;
 
-      db.write(database);
-      db.logAudit(reviewerId || 'admin', 'Head Teacher / Admin', 'REJECT_RESULTS', 'approval', approvalId, `Rejected results: ${rejectionReason}`);
-      return NextResponse.json({ success: true, message: 'Results rejected for correction' });
+      return NextResponse.json({
+        success: true,
+        approval: updatedApproval,
+        message: isApproved
+          ? 'Results approved successfully'
+          : 'Results rejected for correction',
+      });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to process approval action' }, { status: 500 });
+    console.error('Process approval error:', error);
+    return NextResponse.json(
+      { error: 'Failed to process approval action' },
+      { status: 500 }
+    );
   }
 }

@@ -1,80 +1,201 @@
+
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { SchoolClass } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+
+const SCHOOL_ID = 'sch_happy_home';
+
+function mapClass(cls: any, studentCount = 0, teacherName = 'Unassigned') {
+  return {
+    id: cls.id,
+    schoolId: cls.school_id,
+    name: cls.name,
+    arm: cls.arm || '',
+    category: cls.category,
+    order: cls.class_order,
+    classTeacherId: cls.class_teacher_id || undefined,
+    capacity: cls.capacity,
+    createdAt: cls.created_at,
+    studentCount,
+    teacherName,
+  };
+}
+
+async function logAudit(action: string, id: string, details: string) {
+  const { error } = await supabase.from('audit_logs').insert({
+    school_id: SCHOOL_ID,
+    user_id: null,
+    user_name: 'Administrator',
+    action,
+    entity_type: 'class',
+    entity_id: id,
+    details,
+  });
+
+  if (error) throw error;
+}
 
 export async function GET() {
   try {
-    const database = db.read();
-    const classesWithMeta = database.classes.map(cls => {
-      const studentCount = database.students.filter(s => s.classId === cls.id && s.status === 'active').length;
-      const teacher = database.users.find(u => u.id === cls.classTeacherId);
-      return {
-        ...cls,
-        studentCount,
-        teacherName: teacher ? teacher.fullName : 'Unassigned',
-      };
-    }).sort((a, b) => a.order - b.order);
+    const [classesRes, studentsRes, usersRes] = await Promise.all([
+      supabase
+        .from('classes')
+        .select('*')
+        .eq('school_id', SCHOOL_ID)
+        .order('class_order', { ascending: true }),
 
-    return NextResponse.json({ classes: classesWithMeta });
+      supabase
+        .from('students')
+        .select('id, class_id')
+        .eq('school_id', SCHOOL_ID)
+        .eq('status', 'active'),
+
+      supabase
+        .from('users')
+        .select('id, full_name')
+        .eq('school_id', SCHOOL_ID),
+    ]);
+
+    if (classesRes.error) throw classesRes.error;
+    if (studentsRes.error) throw studentsRes.error;
+    if (usersRes.error) throw usersRes.error;
+
+    const classes = (classesRes.data || []).map((cls) => {
+      const studentCount = (studentsRes.data || []).filter(
+        (student) => student.class_id === cls.id
+      ).length;
+
+      const teacher = (usersRes.data || []).find(
+        (user) => user.id === cls.class_teacher_id
+      );
+
+      return mapClass(cls, studentCount, teacher?.full_name || 'Unassigned');
+    });
+
+    return NextResponse.json({ classes });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch classes' }, { status: 500 });
+    console.error('Fetch classes error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch classes' },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const database = db.read();
 
     if (!body.name?.trim()) {
-      return NextResponse.json({ error: 'Class name is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Class name is required' },
+        { status: 400 }
+      );
     }
 
-    const nextOrder = database.classes.length > 0 ? Math.max(...database.classes.map(c => c.order)) + 1 : 1;
+    const { data: existingClasses, error: fetchError } = await supabase
+      .from('classes')
+      .select('class_order')
+      .eq('school_id', SCHOOL_ID);
 
-    const newClass: SchoolClass = {
+    if (fetchError) throw fetchError;
+
+    const nextOrder = existingClasses?.length
+      ? Math.max(...existingClasses.map((cls) => Number(cls.class_order))) + 1
+      : 1;
+
+    const newClass = {
       id: `cls_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-      schoolId: database.school.id,
+      school_id: SCHOOL_ID,
       name: body.name.trim(),
       arm: body.arm?.trim() || '',
       category: body.category || 'primary',
-      order: body.order ? Number(body.order) : nextOrder,
-      classTeacherId: body.classTeacherId || undefined,
+      class_order: body.order ? Number(body.order) : nextOrder,
+      class_teacher_id: body.classTeacherId || null,
       capacity: body.capacity ? Number(body.capacity) : 35,
-      createdAt: new Date().toISOString(),
     };
 
-    database.classes.push(newClass);
-    db.write(database);
-    db.logAudit('admin', 'Administrator', 'CREATE_CLASS', 'class', newClass.id, `Created class: ${newClass.name}`);
+    const { data, error } = await supabase
+      .from('classes')
+      .insert(newClass)
+      .select()
+      .single();
 
-    return NextResponse.json({ success: true, class: newClass });
+    if (error) throw error;
+
+    await logAudit(
+      'CREATE_CLASS',
+      data.id,
+      `Created class: ${data.name}`
+    );
+
+    return NextResponse.json({
+      success: true,
+      class: mapClass(data),
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to create class' }, { status: 500 });
+    console.error('Create class error:', error);
+    return NextResponse.json(
+      { error: 'Failed to create class' },
+      { status: 500 }
+    );
   }
 }
 
 export async function PUT(request: Request) {
   try {
     const body = await request.json();
-    const database = db.read();
 
-    const index = database.classes.findIndex(c => c.id === body.id);
-    if (index === -1) {
-      return NextResponse.json({ error: 'Class not found' }, { status: 404 });
+    if (!body.id) {
+      return NextResponse.json(
+        { error: 'Class ID is required' },
+        { status: 400 }
+      );
     }
 
-    database.classes[index] = {
-      ...database.classes[index],
-      ...body,
-    };
+    const updates: Record<string, any> = {};
 
-    db.write(database);
-    db.logAudit('admin', 'Administrator', 'UPDATE_CLASS', 'class', body.id, `Updated class: ${database.classes[index].name}`);
+    if (body.name !== undefined) updates.name = body.name.trim();
+    if (body.arm !== undefined) updates.arm = body.arm.trim();
+    if (body.category !== undefined) updates.category = body.category;
+    if (body.order !== undefined) updates.class_order = Number(body.order);
+    if (body.classTeacherId !== undefined) {
+      updates.class_teacher_id = body.classTeacherId || null;
+    }
+    if (body.capacity !== undefined) updates.capacity = Number(body.capacity);
 
-    return NextResponse.json({ success: true, class: database.classes[index] });
+    const { data, error } = await supabase
+      .from('classes')
+      .update(updates)
+      .eq('id', body.id)
+      .eq('school_id', SCHOOL_ID)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!data) {
+      return NextResponse.json(
+        { error: 'Class not found' },
+        { status: 404 }
+      );
+    }
+
+    await logAudit(
+      'UPDATE_CLASS',
+      body.id,
+      `Updated class: ${data.name}`
+    );
+
+    return NextResponse.json({
+      success: true,
+      class: mapClass(data),
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to update class' }, { status: 500 });
+    console.error('Update class error:', error);
+    return NextResponse.json(
+      { error: 'Failed to update class' },
+      { status: 500 }
+    );
   }
 }
 
@@ -84,29 +205,61 @@ export async function DELETE(request: Request) {
     const id = searchParams.get('id');
 
     if (!id) {
-      return NextResponse.json({ error: 'Class ID is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Class ID is required' },
+        { status: 400 }
+      );
     }
 
-    const database = db.read();
-    const studentCount = database.students.filter(s => s.classId === id).length;
-    if (studentCount > 0) {
-      return NextResponse.json({ 
-        error: `Cannot delete class. It contains ${studentCount} registered student(s). Reassign them first.` 
-      }, { status: 400 });
+    const { count, error: countError } = await supabase
+      .from('students')
+      .select('id', { count: 'exact', head: true })
+      .eq('school_id', SCHOOL_ID)
+      .eq('class_id', id);
+
+    if (countError) throw countError;
+
+    if ((count || 0) > 0) {
+      return NextResponse.json(
+        {
+          error: `Cannot delete class. It contains ${count} registered student(s). Reassign them first.`,
+        },
+        { status: 400 }
+      );
     }
 
-    const index = database.classes.findIndex(c => c.id === id);
-    if (index === -1) {
-      return NextResponse.json({ error: 'Class not found' }, { status: 404 });
+    const { data: deleted, error } = await supabase
+      .from('classes')
+      .delete()
+      .eq('id', id)
+      .eq('school_id', SCHOOL_ID)
+      .select()
+      .maybeSingle();
+
+    if (error) throw error;
+
+    if (!deleted) {
+      return NextResponse.json(
+        { error: 'Class not found' },
+        { status: 404 }
+      );
     }
 
-    const deleted = database.classes.splice(index, 1)[0];
-    db.write(database);
-    db.logAudit('admin', 'Administrator', 'DELETE_CLASS', 'class', id, `Deleted class: ${deleted.name}`);
+    await logAudit(
+      'DELETE_CLASS',
+      id,
+      `Deleted class: ${deleted.name}`
+    );
 
-    return NextResponse.json({ success: true, message: 'Class deleted successfully' });
+    return NextResponse.json({
+      success: true,
+      message: 'Class deleted successfully',
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to delete class' }, { status: 500 });
+    console.error('Delete class error:', error);
+    return NextResponse.json(
+      { error: 'Failed to delete class' },
+      { status: 500 }
+    );
   }
 }
-

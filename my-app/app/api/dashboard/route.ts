@@ -1,5 +1,10 @@
+
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
+
+const SCHOOL_ID = 'sch_happy_home';
+
+type Row = Record<string, any>;
 
 export async function GET(request: Request) {
   try {
@@ -8,127 +13,327 @@ export async function GET(request: Request) {
     const termId = searchParams.get('termId');
     const classId = searchParams.get('classId');
 
-    const database = db.read();
+    const [
+      sessionsRes,
+      termsRes,
+      studentsRes,
+      classesRes,
+      usersRes,
+      subjectsRes,
+      scoresRes,
+      attendanceRes,
+    ] = await Promise.all([
+      supabase
+        .from('academic_sessions')
+        .select('*')
+        .order('name'),
+
+      supabase
+        .from('academic_terms')
+        .select('*')
+        .order('name'),
+
+      supabase
+        .from('students')
+        .select('*')
+        .eq('school_id', SCHOOL_ID),
+
+      supabase
+        .from('classes')
+        .select('*')
+        .eq('school_id', SCHOOL_ID)
+        .order('class_order'),
+
+      supabase
+        .from('users')
+        .select('id, full_name, role')
+        .eq('school_id', SCHOOL_ID),
+
+      supabase
+        .from('subjects')
+        .select('*')
+        .eq('school_id', SCHOOL_ID)
+        .order('subject_order'),
+
+      supabase
+        .from('scores')
+        .select('*')
+        .eq('school_id', SCHOOL_ID),
+
+      supabase
+        .from('attendance_records')
+        .select('*')
+        .eq('school_id', SCHOOL_ID),
+    ]);
+
+    for (const result of [
+      sessionsRes,
+      termsRes,
+      studentsRes,
+      classesRes,
+      usersRes,
+      subjectsRes,
+      scoresRes,
+      attendanceRes,
+    ]) {
+      if (result.error) throw result.error;
+    }
+
+    const sessions: Row[] = sessionsRes.data || [];
+    const terms: Row[] = termsRes.data || [];
+    const students: Row[] = studentsRes.data || [];
+    const classes: Row[] = classesRes.data || [];
+    const users: Row[] = usersRes.data || [];
+    const subjects: Row[] = subjectsRes.data || [];
+    const allScores: Row[] = scoresRes.data || [];
+    const allAttendance: Row[] = attendanceRes.data || [];
 
     const activeSession = sessionId
-      ? database.sessions.find(s => s.id === sessionId)
-      : database.sessions.find(s => s.isCurrent) || database.sessions[0];
+      ? sessions.find((s) => s.id === sessionId)
+      : sessions.find((s) => s.is_current) || sessions[0];
 
     const activeTerm = termId
-      ? database.terms.find(t => t.id === termId)
-      : database.terms.find(t => t.isCurrent) || database.terms[0];
+      ? terms.find((t) => t.id === termId)
+      : terms.find((t) => t.is_current) || terms[0];
 
     const currentSessionId = activeSession?.id || '';
     const currentTermId = activeTerm?.id || '';
 
-    // Students filter
-    let relevantStudents = database.students;
+    // Students
+    let relevantStudents = students;
+
     if (classId && classId !== 'all') {
-      relevantStudents = relevantStudents.filter(s => s.classId === classId);
+      relevantStudents = relevantStudents.filter(
+        (student) => student.class_id === classId
+      );
     }
+
     const totalStudents = relevantStudents.length;
-    const totalActiveStudents = relevantStudents.filter(s => s.status === 'active').length;
+    const totalActiveStudents = relevantStudents.filter(
+      (student) => student.status === 'active'
+    ).length;
 
-    // Classes & Teachers & Subjects
-    const totalClasses = database.classes.length;
-    const totalTeachers = database.users.filter(u => u.role.includes('teacher')).length;
-    const totalSubjects = database.subjects.length;
+    // Classes, teachers and subjects
+    const totalClasses = classes.length;
+    const totalTeachers = users.filter(
+      (user) => String(user.role || '').includes('teacher')
+    ).length;
+    const totalSubjects = subjects.length;
 
-    // Scores filtered by session, term, and optionally class
-    let filteredScores = database.scores.filter(
-      s => s.sessionId === currentSessionId && s.termId === currentTermId
+    // Scores for selected session and term
+    let sessionScores = allScores.filter(
+      (score) => score.session_id === currentSessionId
     );
+
+    let filteredScores = sessionScores.filter(
+      (score) => score.term_id === currentTermId
+    );
+
     if (classId && classId !== 'all') {
-      filteredScores = filteredScores.filter(s => s.classId === classId);
+      filteredScores = filteredScores.filter(
+        (score) => score.class_id === classId
+      );
     }
 
-    // Students with completed results (students who have scores in at least 1 subject)
-    const studentsWithScoreIds = new Set(filteredScores.map(s => s.studentId));
+    // Students with results
+    const studentsWithScoreIds = new Set(
+      filteredScores.map((score) => score.student_id)
+    );
+
     const studentsWithCompletedResults = studentsWithScoreIds.size;
 
-    // Overall Average and Pass Rate
+    // Average and pass rate
     let overallAverage = 0;
     let overallPassRate = 0;
+
     if (filteredScores.length > 0) {
-      const sum = filteredScores.reduce((acc, curr) => acc + curr.overallTotal, 0);
-      overallAverage = Number((sum / filteredScores.length).toFixed(1));
-      const passedCount = filteredScores.filter(s => s.overallTotal >= 40).length;
-      overallPassRate = Number(((passedCount / filteredScores.length) * 100).toFixed(1));
+      const sum = filteredScores.reduce(
+        (acc, score) => acc + Number(score.overall_total || 0),
+        0
+      );
+
+      overallAverage = Number(
+        (sum / filteredScores.length).toFixed(1)
+      );
+
+      const passedCount = filteredScores.filter(
+        (score) => Number(score.overall_total || 0) >= 40
+      ).length;
+
+      overallPassRate = Number(
+        ((passedCount / filteredScores.length) * 100).toFixed(1)
+      );
     }
 
     // Chart 1: Student population by class
-    const populationByClass = database.classes.map(cls => {
-      const count = database.students.filter(s => s.classId === cls.id && s.status === 'active').length;
-      return {
-        className: cls.name,
-        count,
-      };
-    });
+    const populationByClass = classes.map((cls) => ({
+      className: cls.name,
+      count: students.filter(
+        (student) =>
+          student.class_id === cls.id &&
+          student.status === 'active'
+      ).length,
+    }));
 
     // Chart 2: Performance by subject
-    const performanceBySubject = database.subjects.map(sub => {
-      const subScores = filteredScores.filter(s => s.subjectId === sub.id);
-      const avg = subScores.length > 0
-        ? Number((subScores.reduce((acc, c) => acc + c.overallTotal, 0) / subScores.length).toFixed(1))
+    const performanceBySubject = subjects.map((subject) => {
+      const subScores = filteredScores.filter(
+        (score) => score.subject_id === subject.id
+      );
+
+      const avg = subScores.length
+        ? Number(
+            (
+              subScores.reduce(
+                (acc, score) =>
+                  acc + Number(score.overall_total || 0),
+                0
+              ) / subScores.length
+            ).toFixed(1)
+          )
         : 0;
+
       return {
-        subjectName: sub.name,
-        code: sub.code,
+        subjectName: subject.name,
+        code: subject.code,
         average: avg,
         totalEntries: subScores.length,
       };
     });
 
     // Chart 3: Performance by class
-    const performanceByClass = database.classes.map(cls => {
-      const classScores = database.scores.filter(
-        s => s.sessionId === currentSessionId && s.termId === currentTermId && s.classId === cls.id
+    const performanceByClass = classes.map((cls) => {
+      const classScores = sessionScores.filter(
+        (score) =>
+          score.term_id === currentTermId &&
+          score.class_id === cls.id
       );
-      const avg = classScores.length > 0
-        ? Number((classScores.reduce((acc, c) => acc + c.overallTotal, 0) / classScores.length).toFixed(1))
+
+      const avg = classScores.length
+        ? Number(
+            (
+              classScores.reduce(
+                (acc, score) =>
+                  acc + Number(score.overall_total || 0),
+                0
+              ) / classScores.length
+            ).toFixed(1)
+          )
         : 0;
+
       return {
         className: cls.name,
         average: avg,
       };
     });
 
-    // Chart 4: Grade distribution (A, B, C, D, E, F)
-    const gradeDistribution: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
-    for (const sc of filteredScores) {
-      if (gradeDistribution[sc.grade] !== undefined) {
-        gradeDistribution[sc.grade]++;
-      } else {
-        gradeDistribution[sc.grade] = (gradeDistribution[sc.grade] || 0) + 1;
+    // Chart 4: Grade distribution
+    const gradeDistribution: Record<string, number> = {
+      A: 0,
+      B: 0,
+      C: 0,
+      D: 0,
+      E: 0,
+      F: 0,
+    };
+
+    for (const score of filteredScores) {
+      const grade = score.grade || '';
+
+      if (grade) {
+        gradeDistribution[grade] =
+          (gradeDistribution[grade] || 0) + 1;
       }
     }
 
-    // Chart 5: Termly academic performance trend
-    const termlyPerformance = database.terms
-      .filter(t => t.sessionId === currentSessionId)
-      .map(term => {
-        const termScores = database.scores.filter(
-          s => s.sessionId === currentSessionId && s.termId === term.id && (classId && classId !== 'all' ? s.classId === classId : true)
+    // Chart 5: Performance across terms
+    const termlyPerformance = terms
+      .filter((term) => term.session_id === currentSessionId)
+      .map((term) => {
+        let termScores = sessionScores.filter(
+          (score) => score.term_id === term.id
         );
-        const avg = termScores.length > 0
-          ? Number((termScores.reduce((acc, c) => acc + c.overallTotal, 0) / termScores.length).toFixed(1))
+
+        if (classId && classId !== 'all') {
+          termScores = termScores.filter(
+            (score) => score.class_id === classId
+          );
+        }
+
+        const avg = termScores.length
+          ? Number(
+              (
+                termScores.reduce(
+                  (acc, score) =>
+                    acc + Number(score.overall_total || 0),
+                  0
+                ) / termScores.length
+              ).toFixed(1)
+            )
           : 0;
+
         return {
           termName: term.name,
           average: avg,
         };
       });
 
-    // Attendance stats
-    const attendanceRecords = database.attendanceRecords.filter(
-      a => a.sessionId === currentSessionId && a.termId === currentTermId && (classId && classId !== 'all' ? a.classId === classId : true)
+    // Attendance statistics
+    let attendanceRecords = allAttendance.filter(
+      (record) =>
+        record.session_id === currentSessionId &&
+        record.term_id === currentTermId
     );
-    let avgAttendanceRate = 100;
-    if (attendanceRecords.length > 0) {
-      const totalDays = attendanceRecords.reduce((acc, a) => acc + a.totalSchoolDays, 0);
-      const presentDays = attendanceRecords.reduce((acc, a) => acc + a.daysPresent, 0);
-      avgAttendanceRate = totalDays > 0 ? Number(((presentDays / totalDays) * 100).toFixed(1)) : 100;
+
+    if (classId && classId !== 'all') {
+      attendanceRecords = attendanceRecords.filter(
+        (record) => record.class_id === classId
+      );
     }
+
+    let avgAttendanceRate = 100;
+
+    if (attendanceRecords.length > 0) {
+      const totalDays = attendanceRecords.reduce(
+        (acc, record) =>
+          acc + Number(record.total_school_days || 0),
+        0
+      );
+
+      const presentDays = attendanceRecords.reduce(
+        (acc, record) =>
+          acc + Number(record.days_present || 0),
+        0
+      );
+
+      avgAttendanceRate =
+        totalDays > 0
+          ? Number(((presentDays / totalDays) * 100).toFixed(1))
+          : 100;
+    }
+
+    // Convert database field names to the format expected by the frontend
+    const formattedSessions = sessions.map((session) => ({
+      ...session,
+      isCurrent: session.is_current,
+    }));
+
+    const formattedTerms = terms.map((term) => ({
+      ...term,
+      sessionId: term.session_id,
+      isCurrent: term.is_current,
+    }));
+
+    const formattedClasses = classes.map((cls) => ({
+      id: cls.id,
+      schoolId: cls.school_id,
+      name: cls.name,
+      arm: cls.arm || '',
+      category: cls.category,
+      order: cls.class_order,
+      classTeacherId: cls.class_teacher_id,
+      capacity: cls.capacity,
+    }));
 
     return NextResponse.json({
       kpis: {
@@ -149,14 +354,25 @@ export async function GET(request: Request) {
         gradeDistribution,
         termlyPerformance,
       },
-      activeSession,
-      activeTerm,
-      sessions: database.sessions,
-      terms: database.terms,
-      classes: database.classes,
+      activeSession: activeSession
+        ? { ...activeSession, isCurrent: activeSession.is_current }
+        : null,
+      activeTerm: activeTerm
+        ? {
+            ...activeTerm,
+            sessionId: activeTerm.session_id,
+            isCurrent: activeTerm.is_current,
+          }
+        : null,
+      sessions: formattedSessions,
+      terms: formattedTerms,
+      classes: formattedClasses,
     });
   } catch (error) {
     console.error('Dashboard fetch error:', error);
-    return NextResponse.json({ error: 'Failed to fetch dashboard data' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Failed to fetch dashboard data' },
+      { status: 500 }
+    );
   }
 }

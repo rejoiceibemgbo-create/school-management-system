@@ -398,6 +398,28 @@
   "resultApprovals": [],
   "auditLogs": [
     {
+      "id": "log_1794075218183_8xwwj",
+      "schoolId": "sch_happy_home",
+      "userId": "admin",
+      "userName": "Administrator",
+      "action": "DELETE_STUDENT",
+      "entityType": "student",
+      "entityId": "std_1794075212875_e999",
+      "details": "Removed student record: Ibemgbo Rejoice (HHEC/2026/001)",
+      "createdAt": "2026-11-07T18:13:38.183Z"
+    },
+    {
+      "id": "log_1794075212880_qx94r",
+      "schoolId": "sch_happy_home",
+      "userId": "admin",
+      "userName": "Administrator",
+      "action": "CREATE_STUDENT",
+      "entityType": "student",
+      "entityId": "std_1794075212875_e999",
+      "details": "Registered student Ibemgbo Rejoice (HHEC/2026/001)",
+      "createdAt": "2026-11-07T18:13:32.880Z"
+    },
+    {
       "id": "log_1794001635276_v5193",
       "schoolId": "sch_happy_home",
       "userId": "admin",

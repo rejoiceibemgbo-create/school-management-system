@@ -1,36 +1,63 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
-import { ConductAssessment } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+
+const SCHOOL_ID = 'sch_happy_home';
 
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+
     const sessionId = searchParams.get('sessionId');
     const termId = searchParams.get('termId');
     const classId = searchParams.get('classId');
     const studentId = searchParams.get('studentId');
 
-    const database = db.read();
-
     if (studentId && sessionId && termId) {
-      const conduct = database.conductAssessments.find(
-        c => c.studentId === studentId && c.sessionId === sessionId && c.termId === termId
-      );
+      const { data: conduct, error } = await supabase
+        .from('conduct_assessments')
+        .select('*')
+        .eq('school_id', SCHOOL_ID)
+        .eq('student_id', studentId)
+        .eq('session_id', sessionId)
+        .eq('term_id', termId)
+        .maybeSingle();
+
+      if (error) throw error;
+
       return NextResponse.json({ conduct: conduct || null });
     }
 
     if (classId && sessionId && termId) {
-      const students = database.students.filter(s => s.classId === classId && s.status === 'active');
-      const assessments = database.conductAssessments.filter(
-        c => c.classId === classId && c.sessionId === sessionId && c.termId === termId
-      );
+      const [studentsRes, assessmentsRes] = await Promise.all([
+        supabase
+          .from('students')
+          .select('id, admission_number, first_name, last_name, middle_name')
+          .eq('school_id', SCHOOL_ID)
+          .eq('class_id', classId)
+          .eq('status', 'active')
+          .order('last_name', { ascending: true }),
 
-      const result = students.map(st => {
-        const existing = assessments.find(a => a.studentId === st.id);
+        supabase
+          .from('conduct_assessments')
+          .select('*')
+          .eq('school_id', SCHOOL_ID)
+          .eq('class_id', classId)
+          .eq('session_id', sessionId)
+          .eq('term_id', termId),
+      ]);
+
+      if (studentsRes.error) throw studentsRes.error;
+      if (assessmentsRes.error) throw assessmentsRes.error;
+
+      const result = (studentsRes.data || []).map((student) => {
+        const existing = (assessmentsRes.data || []).find(
+          (assessment) => assessment.student_id === student.id
+        );
+
         return {
-          studentId: st.id,
-          admissionNumber: st.admissionNumber,
-          studentName: `${st.lastName} ${st.firstName} ${st.middleName || ''}`.trim(),
+          studentId: student.id,
+          admissionNumber: student.admission_number,
+          studentName: `${student.last_name} ${student.first_name} ${student.middle_name || ''}`.trim(),
           punctuality: existing?.punctuality ?? 4,
           regularity: existing?.regularity ?? 4,
           neatness: existing?.neatness ?? 4,
@@ -48,9 +75,16 @@ export async function GET(request: Request) {
       return NextResponse.json({ students: result });
     }
 
-    return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Missing parameters' },
+      { status: 400 }
+    );
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to fetch conduct assessments' }, { status: 500 });
+    console.error('Fetch conduct assessments error:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch conduct assessments' },
+      { status: 500 }
+    );
   }
 }
 
@@ -60,25 +94,35 @@ export async function POST(request: Request) {
     const { sessionId, termId, classId, assessments } = body;
 
     if (!sessionId || !termId || !classId || !Array.isArray(assessments)) {
-      return NextResponse.json({ error: 'Missing required assessment parameters' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Missing required assessment parameters' },
+        { status: 400 }
+      );
     }
 
-    const database = db.read();
+    const conductRows = [];
 
     for (const item of assessments) {
       if (!item.studentId) continue;
 
-      const existingIndex = database.conductAssessments.findIndex(
-        c => c.studentId === item.studentId && c.sessionId === sessionId && c.termId === termId
-      );
+      const { data: existing, error: existingError } = await supabase
+        .from('conduct_assessments')
+        .select('id')
+        .eq('school_id', SCHOOL_ID)
+        .eq('student_id', item.studentId)
+        .eq('session_id', sessionId)
+        .eq('term_id', termId)
+        .maybeSingle();
 
-      const record: ConductAssessment = {
-        id: existingIndex !== -1 ? database.conductAssessments[existingIndex].id : `cnd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        schoolId: database.school.id,
-        sessionId,
-        termId,
-        classId,
-        studentId: item.studentId,
+      if (existingError) throw existingError;
+
+      conductRows.push({
+        id: existing?.id || `cnd_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        school_id: SCHOOL_ID,
+        session_id: sessionId,
+        term_id: termId,
+        class_id: classId,
+        student_id: item.studentId,
         punctuality: Math.min(5, Math.max(1, Number(item.punctuality) || 4)),
         regularity: Math.min(5, Math.max(1, Number(item.regularity) || 4)),
         neatness: Math.min(5, Math.max(1, Number(item.neatness) || 4)),
@@ -89,21 +133,41 @@ export async function POST(request: Request) {
         cooperation: Math.min(5, Math.max(1, Number(item.cooperation) || 4)),
         leadership: Math.min(5, Math.max(1, Number(item.leadership) || 4)),
         responsibility: Math.min(5, Math.max(1, Number(item.responsibility) || 4)),
-        updatedAt: new Date().toISOString(),
-      };
-
-      if (existingIndex !== -1) {
-        database.conductAssessments[existingIndex] = record;
-      } else {
-        database.conductAssessments.push(record);
-      }
+        updated_at: new Date().toISOString(),
+      });
     }
 
-    db.write(database);
-    db.logAudit('teacher', 'Teacher', 'SAVE_CONDUCT', 'conduct', `${classId}`, `Updated conduct assessments for class students`);
+    if (conductRows.length > 0) {
+      const { error: saveError } = await supabase
+        .from('conduct_assessments')
+        .upsert(conductRows, { onConflict: 'id' });
 
-    return NextResponse.json({ success: true, message: 'Conduct assessments saved successfully' });
+      if (saveError) throw saveError;
+    }
+
+    const { error: auditError } = await supabase
+      .from('audit_logs')
+      .insert({
+        school_id: SCHOOL_ID,
+        user_id: null,
+        user_name: 'Teacher',
+        action: 'SAVE_CONDUCT',
+        entity_type: 'conduct',
+        entity_id: classId,
+        details: 'Updated conduct assessments for class students',
+      });
+
+    if (auditError) throw auditError;
+
+    return NextResponse.json({
+      success: true,
+      message: 'Conduct assessments saved successfully',
+    });
   } catch (error) {
-    return NextResponse.json({ error: 'Failed to save conduct assessments' }, { status: 500 });
+    console.error('Save conduct assessments error:', error);
+    return NextResponse.json(
+      { error: 'Failed to save conduct assessments' },
+      { status: 500 }
+    );
   }
 }
