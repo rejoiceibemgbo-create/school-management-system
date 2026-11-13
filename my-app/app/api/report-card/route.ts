@@ -78,8 +78,21 @@ function mapConduct(record: Row | undefined) {
   };
 }
 
+// Attendance now uses ONE mark per school day.
 function mapAttendance(record: Row | undefined) {
   if (!record) return undefined;
+
+  const totalDays = Math.max(
+    0,
+    Number(record.total_school_days || 0)
+  );
+
+  const daysPresent = Math.min(
+    totalDays,
+    Math.max(0, Number(record.days_present || 0))
+  );
+
+  const daysAbsent = Math.max(0, totalDays - daysPresent);
 
   return {
     id: record.id,
@@ -88,9 +101,12 @@ function mapAttendance(record: Row | undefined) {
     termId: record.term_id,
     classId: record.class_id,
     studentId: record.student_id,
-    totalSchoolDays: Number(record.total_school_days || 0),
-    daysPresent: Number(record.days_present || 0),
-    daysAbsent: Number(record.days_absent || 0),
+    totalSchoolDays: totalDays,
+    totalMarks: totalDays,
+    marksPresent: daysPresent,
+    marksAbsent: daysAbsent,
+    daysPresent,
+    daysAbsent,
     updatedAt: record.updated_at,
   };
 }
@@ -136,7 +152,6 @@ export async function GET(request: Request) {
       );
     }
 
-    // Fetch the selected student when generating an individual report.
     let selectedStudent: Row | null = null;
 
     if (studentId) {
@@ -289,7 +304,6 @@ export async function GET(request: Request) {
       students,
     });
 
-    // Include the selected student if their status is not active.
     if (
       selectedStudent &&
       !students.some(
@@ -299,7 +313,6 @@ export async function GET(request: Request) {
       students.push(selectedStudent);
     }
 
-    // Generate temporary signed URLs for private student photographs.
     const studentsWithPhotoUrls: Row[] = await Promise.all(
       students.map(async (student): Promise<Row> => {
         let signedPhotoUrl = '';
@@ -362,8 +375,8 @@ export async function GET(request: Request) {
 
       const averageScore = studentScores.length
         ? Number(
-          (totalMarksObtained / studentScores.length).toFixed(2)
-        )
+            (totalMarksObtained / studentScores.length).toFixed(2)
+          )
         : 0;
 
       const overallGrade = gradingScale.find(
@@ -408,19 +421,17 @@ export async function GET(request: Request) {
       };
     });
 
-    // Calculate the class average using students' individual averages.
     const classAverage = summaries.length
       ? Number(
-        (
-          summaries.reduce(
-            (sum, item) => sum + item.averageScore,
-            0
-          ) / summaries.length
-        ).toFixed(2)
-      )
+          (
+            summaries.reduce(
+              (sum, item) => sum + item.averageScore,
+              0
+            ) / summaries.length
+          ).toFixed(2)
+        )
       : 0;
 
-    // Rank students by average score. Equal averages share a position.
     const sorted = [...summaries].sort(
       (a, b) => b.averageScore - a.averageScore
     );
@@ -446,18 +457,19 @@ export async function GET(request: Request) {
 
     const school = schoolRes.data
       ? {
-        id: schoolRes.data.id,
-        name: schoolRes.data.name,
-        motto: schoolRes.data.motto,
-        address: schoolRes.data.address,
-        phone: schoolRes.data.phone,
-        email: schoolRes.data.email,
-        logoUrl: '/logo.jpeg',
-        principalName: schoolRes.data.head_teacher || '',
-        headTeacherName: schoolRes.data.head_teacher || '',
-        headTeacher: schoolRes.data.head_teacher || '',
-      }
+          id: schoolRes.data.id,
+          name: schoolRes.data.name,
+          motto: schoolRes.data.motto,
+          address: schoolRes.data.address,
+          phone: schoolRes.data.phone,
+          email: schoolRes.data.email,
+          logoUrl: '/logo.jpeg',
+          principalName: schoolRes.data.head_teacher || '',
+          headTeacherName: schoolRes.data.head_teacher || '',
+          headTeacher: schoolRes.data.head_teacher || '',
+        }
       : null;
+
     console.log('SCHOOL LOGO VALUE:', school?.logoUrl);
 
     const responseDetails = {

@@ -46,23 +46,23 @@ export default function Home() {
       const authData = await authRes.json();
       const sessData = await sessRes.json();
       const setData = await setRes.json();
-if (authRes.ok && authData.user) {
-  setCurrentUser(authData.user);
+      if (authRes.ok && authData.user) {
+        setCurrentUser(authData.user);
 
-  // Load the registered school users for the navbar dropdown.
-  const usersRes = await fetch('/api/users');
-  const usersData = await usersRes.json();
+        // Load the registered school users for the navbar dropdown.
+        const usersRes = await fetch('/api/users');
+        const usersData = await usersRes.json();
 
-  if (usersRes.ok && Array.isArray(usersData.users)) {
-    setAllUsers(usersData.users);
-  } else {
-    setAllUsers([]);
-    console.error('Unable to load school users:', usersData.error);
-  }
-} else {
-  setCurrentUser(null);
-  setAllUsers([]);
-}
+        if (usersRes.ok && Array.isArray(usersData.users)) {
+          setAllUsers(usersData.users);
+        } else {
+          setAllUsers([]);
+          console.error('Unable to load school users:', usersData.error);
+        }
+      } else {
+        setCurrentUser(null);
+        setAllUsers([]);
+      }
 
       if (sessData.currentSession) {
         setCurrentSession(sessData.currentSession);
@@ -217,11 +217,15 @@ if (authRes.ok && authData.user) {
         </main>
       </div>
 
-      {/* Change Password Modal */}
+      {/* Change Password & Personal Profile Modal */}
       {showPasswordModal && (
         <PasswordModal
           currentUser={currentUser}
           onClose={() => setShowPasswordModal(false)}
+          onUserUpdated={(updatedUser) => {
+            setCurrentUser(updatedUser);
+            loadInitialData();
+          }}
         />
       )}
     </div>

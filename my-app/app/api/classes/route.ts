@@ -22,6 +22,7 @@ function mapClass(cls: any, studentCount = 0, teacherName = 'Unassigned') {
 
 async function logAudit(action: string, id: string, details: string) {
   const { error } = await supabase.from('audit_logs').insert({
+    id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
     school_id: SCHOOL_ID,
     user_id: null,
     user_name: 'Administrator',
@@ -31,7 +32,9 @@ async function logAudit(action: string, id: string, details: string) {
     details,
   });
 
-  if (error) throw error;
+  if (error) {
+    console.error('Class audit log error:', error);
+  }
 }
 
 export async function GET() {

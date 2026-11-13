@@ -21,6 +21,7 @@ export interface School {
   updatedAt: string;
 }
 
+
 export interface User {
   id: string;
   schoolId: string;
@@ -32,9 +33,10 @@ export interface User {
   avatarUrl?: string;
   assignedClassId?: string; // For class teachers
   assignedSubjectIds?: string[]; // For subject teachers
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'pending' | 'rejected';
   createdAt: string;
 }
+
 
 export type ClassCategory = 'nursery' | 'primary' | 'junior_secondary' | 'senior_secondary';
 
@@ -151,6 +153,11 @@ export interface AttendanceRecord {
   totalSchoolDays: number;
   daysPresent: number;
   daysAbsent: number;
+  totalMarks?: number;
+  marksPresent?: number;
+  marksAbsent?: number;
+  morningPresent?: number;
+  afternoonPresent?: number;
   updatedAt: string;
 }
 
