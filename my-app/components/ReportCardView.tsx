@@ -86,7 +86,7 @@ export default function ReportCardView() {
           }
         }
       } catch (err) {
-        console.error(err);
+        console.error('Error loading report-card metadata:', err);
       }
     };
 
@@ -143,7 +143,7 @@ export default function ReportCardView() {
         }
       }
     } catch (err) {
-      console.error(err);
+      console.error('Error loading report cards:', err);
     } finally {
       setLoading(false);
     }
@@ -152,20 +152,6 @@ export default function ReportCardView() {
   useEffect(() => {
     loadReports();
   }, [selectedSession, selectedTerm, selectedClass]);
-
-  const formatOrdinal = (n: number) => {
-    if (!n || n === 0) return '—';
-
-    const suffixes = ['th', 'st', 'nd', 'rd'];
-    const value = n % 100;
-
-    return (
-      n +
-      (suffixes[(value - 20) % 10] ||
-        suffixes[value] ||
-        suffixes[0])
-    );
-  };
 
   // Browser printing
   const handleBrowserPrint = () => {
@@ -297,8 +283,7 @@ export default function ReportCardView() {
         const imageHeight = canvas.height * scale;
 
         const x = (pageWidth - imageWidth) / 2;
-        const y =
-          margin + (usableHeight - imageHeight) / 2;
+        const y = margin + (usableHeight - imageHeight) / 2;
 
         if (i > 0) {
           pdf.addPage();
@@ -325,13 +310,13 @@ export default function ReportCardView() {
             }_Report_Cards`;
 
       const safeTargetName = targetName.replace(
-        /[<>:"/\\|?*]/g,
+        /[<>:"\/\\|?*]/g,
         '_'
       );
 
       const safeTermName = String(
         metaInfo.termName || 'Term'
-      ).replace(/[<>:"/\\|?*]/g, '_');
+      ).replace(/[<>:"\/\\|?*]/g, '_');
 
       pdf.save(`${safeTargetName}_${safeTermName}.pdf`);
     } catch (err) {
@@ -552,8 +537,7 @@ export default function ReportCardView() {
                   value={r.student.id}
                 >
                   {r.student.lastName} {r.student.firstName} (
-                  {r.student.admissionNumber}) — Position:{' '}
-                  {formatOrdinal(r.classPosition)}
+                  {r.student.admissionNumber})
                 </option>
               ))}
             </select>
@@ -644,14 +628,14 @@ export default function ReportCardView() {
               totalPossibleMarks,
               averageScore,
               overallGrade,
+              overallRemark,
               subjectsPassed,
               subjectsFailed,
-              classPosition,
               totalStudentsInClass,
               classAverage,
             } = report;
 
-            // Attendance now uses ONE mark per school day.
+            // Attendance uses ONE mark per school day.
             const totalSchoolDays =
               attendance?.totalSchoolDays ??
               metaInfo.totalSchoolDays ??
@@ -965,11 +949,11 @@ export default function ReportCardView() {
 
                     <div className="border-r border-slate-200">
                       <span className="text-[9px] text-slate-500 uppercase font-semibold block">
-                        Class Position
+                        Overall Remark
                       </span>
 
                       <strong className="text-amber-700 text-sm">
-                        {formatOrdinal(classPosition)}
+                        {overallRemark || '—'}
                       </strong>
                     </div>
 
